@@ -25,7 +25,8 @@ const WsClient = struct {
         self.io = io;
 
         const host = try std.Io.net.HostName.init(host_name);
-        self.stream = try host.connect(io, 443, .{
+        // TODO: switch back to 443
+        self.stream = try host.connect(io, 8443, .{
             .mode = .stream,
             .protocol = .tcp,
         });
@@ -38,6 +39,13 @@ const WsClient = struct {
         var bundle = std.crypto.Certificate.Bundle{ .map = .empty, .bytes = .empty };
         defer bundle.deinit(gpa);
         try bundle.rescan(gpa, io, now);
+        // TODO: remove this
+        try bundle.addCertsFromFilePathAbsolute(
+            gpa,
+            io,
+            now,
+            "/Users/hadrian/Library/Application Support/mkcert/rootCA.pem",
+        );
         var lock = std.Io.RwLock.init;
         var entropy: [TlsClient.Options.entropy_len]u8 = undefined;
         io.random(&entropy);
@@ -79,31 +87,65 @@ const WsClient = struct {
         _ = try self.client.reader.discard(.limited(head.len));
     }
 
-    pub fn receive(self: *WsClient) !?Message {
-        const header = try Header.fromInt(try self.client.reader.takeInt(u16, .little));
+    pub fn receive(self: *WsClient) !Message {
+        const header = try self.receiveHeader(.start);
         const length = try header.getLength(&self.client.reader);
-
-        if (!header.fin) {
-            // TODO: combine multiple frames
-            @panic("todo");
-        }
 
         if (!header.opcode.validPayloadLength(length))
             return error.InvalidPayloadLength;
 
-        if (header.opcode == .close) {
-            @panic("todo");
-            // return;
+        switch (header.opcode) {
+            .close => {
+                if (length == 0) return .{ .close = null };
+                const code = try self.client.reader.takeInt(u16, .big);
+                const reason = try self.client.reader.readAlloc(self.gpa, length - 2);
+                return .{ .close = .{ .code = code, .reason = reason } };
+            },
+            .ping => return .{ .ping = try self.client.reader.readAlloc(self.gpa, length) },
+            .pong => return .{ .pong = try self.client.reader.readAlloc(self.gpa, length) },
+            .text => return .{ .text = try self.receiveDataPayload(header, length) },
+            .binary => return .{ .binary = try self.receiveDataPayload(header, length) },
+            .continuation => unreachable,
         }
+    }
 
-        const payload = try self.client.reader.readAlloc(self.gpa, length);
-        return switch (header.opcode) {
-            .text => .{ .text = payload },
-            .binary => .{ .binary = payload },
-            .ping => .{ .ping = payload },
-            .pong => .{ .pong = payload },
-            else => unreachable,
-        };
+    fn receiveDataPayload(self: *WsClient, first: Header, first_length: u64) ![]u8 {
+        var payload: []u8 = &.{};
+        errdefer self.gpa.free(payload);
+
+        var fin = first.fin;
+        var length = first_length;
+        while (true) {
+            const len: usize = @intCast(length);
+            const old_len = payload.len;
+            payload = try self.gpa.realloc(payload, old_len + len);
+            try self.client.reader.readSliceAll(payload[old_len..][0..len]);
+            if (fin) return payload;
+
+            const header = try self.receiveHeader(.continuation);
+            length = try header.getLength(&self.client.reader);
+            if (!header.opcode.validPayloadLength(length))
+                return error.InvalidPayloadLength;
+            fin = header.fin;
+        }
+    }
+
+    fn receiveHeader(self: *WsClient, kind: enum { start, continuation }) !Header {
+        const raw = try self.client.reader.takeInt(u16, .little);
+        if (std.enums.fromInt(Opcode, @as(u4, @truncate(raw))) == null)
+            return error.InvalidOpcode;
+        const header: Header = @bitCast(raw);
+
+        switch (kind) {
+            .start => if (header.opcode == .continuation)
+                return error.UnexpectedContinuation,
+            .continuation => if (header.opcode != .continuation)
+                return error.ExpectedContinuation,
+        }
+        if (!header.fin and header.opcode != .continuation and !header.opcode.fragmentable())
+            return error.FragmentedControlFrame;
+
+        return header;
     }
 
     pub fn send(self: *WsClient, message: Message) !void {
@@ -220,7 +262,8 @@ pub fn main(init: std.process.Init) !void {
     try ws.init(
         init.gpa,
         init.io,
-        "echo.websocket.org",
+        // TODO: switch back to "echo.websocket.org"
+        "localhost",
         &tcp_read_buffer,
         &tcp_write_buffer,
         &tls_read_buffer,
@@ -228,17 +271,9 @@ pub fn main(init: std.process.Init) !void {
     );
     defer ws.deinit();
 
-    if (try ws.receive()) |message| {
-        defer message.deinit(init.gpa);
-        std.debug.dumpHex(message.text);
-    }
-
-    try ws.send(.{ .ping = @constCast("hello") });
-
-    if (try ws.receive()) |message| {
-        defer message.deinit(init.gpa);
-        std.debug.dumpHex(message.pong);
-    }
+    const message = try ws.receive();
+    defer message.deinit(init.gpa);
+    std.debug.dumpHex(message.text);
 }
 
 const Header = packed struct(u16) {
@@ -247,18 +282,6 @@ const Header = packed struct(u16) {
     fin: bool,
     length: u7,
     mask: bool,
-
-    pub fn fromInt(raw: u16) !Header {
-        if (std.enums.fromInt(Opcode, @as(u4, @truncate(raw))) == null)
-            return error.InvalidOpcode;
-        const header: Header = @bitCast(raw);
-
-        if (header.opcode == .continuation)
-            return error.UnexpectedContinuation;
-        if (!header.fin and !header.opcode.fragmentable())
-            return error.FragmentedControlFrame;
-        return header;
-    }
 
     pub fn getLength(self: Header, reader: *std.Io.Reader) !u64 {
         return switch (self.length) {
