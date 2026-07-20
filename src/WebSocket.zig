@@ -2,7 +2,8 @@ const std = @import("std");
 const TlsClient = std.crypto.tls.Client;
 const Allocator = std.mem.Allocator;
 
-pub const buffer_len = std.math.ceilPowerOfTwoAssert(usize, TlsClient.min_buffer_len);
+pub const min_buffer_len = TlsClient.min_buffer_len;
+const buffer_len = std.math.ceilPowerOfTwoAssert(usize, min_buffer_len);
 
 gpa: Allocator,
 io: std.Io,

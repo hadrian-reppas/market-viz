@@ -1,5 +1,6 @@
 const std = @import("std");
 const WebSocket = @import("WebSocket.zig");
+const Kalshi = @import("Kalshi.zig");
 const secrets = @import("secrets.zig");
 
 pub fn main(init: std.process.Init) !void {
