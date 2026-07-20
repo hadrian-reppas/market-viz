@@ -25,6 +25,7 @@ pub const Options = struct {
 
     host: []const u8,
     port: u16 = 443,
+    extra_headers: []const std.http.Header = &.{},
     bundle: ?*std.crypto.Certificate.Bundle = null,
     buffers: ?Buffers = null,
 };
@@ -116,10 +117,13 @@ pub fn init(
             "Upgrade: websocket\r\n" ++
             "Connection: Upgrade\r\n" ++
             "Sec-WebSocket-Version: 13\r\n" ++
-            "Sec-WebSocket-Key: {s}\r\n" ++
-            "\r\n",
+            "Sec-WebSocket-Key: {s}\r\n",
         .{ options.host, host_port, key_base64 },
     );
+    for (options.extra_headers) |header| {
+        try self.client.writer.print("{s}: {s}\r\n", .{ header.name, header.value });
+    }
+    try self.client.writer.writeAll("\r\n");
     try self.client.writer.flush();
     try self.tcp_writer.interface.flush();
 
