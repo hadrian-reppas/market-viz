@@ -104,21 +104,27 @@ pub fn init(
     var key_base64: [24]u8 = undefined;
     _ = std.base64.standard.Encoder.encode(&key_base64, key);
 
+    var host_port_buffer: [6]u8 = undefined;
+    const host_port = if (options.port != 443)
+        std.fmt.bufPrint(&host_port_buffer, ":{}", .{options.port}) catch unreachable
+    else
+        "";
+
     try self.client.writer.print(
         "GET / HTTP/1.1\r\n" ++
-            "Host: {s}\r\n" ++
+            "Host: {s}{s}\r\n" ++
             "Upgrade: websocket\r\n" ++
             "Connection: Upgrade\r\n" ++
             "Sec-WebSocket-Version: 13\r\n" ++
             "Sec-WebSocket-Key: {s}\r\n" ++
             "\r\n",
-        .{ options.host, key_base64 },
+        .{ options.host, host_port, key_base64 },
     );
     try self.client.writer.flush();
     try self.tcp_writer.interface.flush();
 
     const head = try receiveHead(&self.client.reader);
-    try validateHttpResponse(try .parse(head));
+    try validateHttpResponse(try .parse(head), &key_base64);
     _ = try self.client.reader.discard(.limited(head.len));
 }
 
@@ -138,36 +144,42 @@ fn receiveHead(reader: *std.Io.Reader) ![]const u8 {
     }
 }
 
-fn validateHttpResponse(head: std.http.Client.Response.Head) !void {
-    // TODO: check Sec-Websocket-Accept
-    // TODO: check for (and reject) extensions
-    // TODO: check for (and reject) subprotocol
+fn validateHttpResponse(head: std.http.Client.Response.Head, key: []const u8) !void {
     const eql = std.ascii.eqlIgnoreCase;
+    const guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
     if (head.status != .switching_protocols)
         return error.HandshakeFailed;
 
+    var concat_buffer: [24 + guid.len]u8 = undefined;
+    const concat = std.fmt.bufPrint(&concat_buffer, "{s}{s}", .{ key, guid }) catch unreachable;
+    var hashed: [std.crypto.hash.Sha1.digest_length]u8 = undefined;
+    std.crypto.hash.Sha1.hash(concat, &hashed, .{});
+    var base64_buffer: [28]u8 = undefined;
+    const expected_accept_value = std.base64.standard.Encoder.encode(&base64_buffer, &hashed);
+
     var seen_upgrade = false;
     var seen_connection = false;
+    var seen_accept = false;
 
     var iterator = head.iterateHeaders();
     while (iterator.next()) |header| {
-        if (eql(header.name, "Upgrade")) {
-            if (eql(header.value, "websocket")) {
-                seen_upgrade = true;
-            } else {
-                return error.HandshakeFailed;
-            }
-        } else if (std.ascii.eqlIgnoreCase(header.name, "Connection")) {
-            if (eql(header.value, "upgrade")) {
-                seen_connection = true;
-            } else {
-                return error.HandshakeFailed;
-            }
+        if (eql(header.name, "Upgrade") and eql(header.value, "websocket")) {
+            seen_upgrade = true;
+        } else if (eql(header.name, "Connection") and eql(header.value, "upgrade")) {
+            seen_connection = true;
+        } else if (eql(header.name, "Sec-WebSocket-Accept") and
+            std.mem.eql(u8, header.value, expected_accept_value))
+        {
+            seen_accept = true;
+        } else if (eql(header.name, "Sec-WebSocket-Extensions") or
+            eql(header.name, "Sec-WebSocket-Protocol"))
+        {
+            return error.HandshakeFailed;
         }
     }
 
-    if (!seen_upgrade or !seen_connection)
+    if (!seen_upgrade or !seen_connection or !seen_accept)
         return error.HandshakeFailed;
 }
 
