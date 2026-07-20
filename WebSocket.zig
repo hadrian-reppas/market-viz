@@ -9,8 +9,9 @@ io: std.Io,
 stream: std.Io.net.Stream,
 tcp_reader: std.Io.net.Stream.Reader,
 tcp_writer: std.Io.net.Stream.Writer,
-owned_buffer: ?[]u8,
 client: TlsClient,
+owned_buffer: ?[]u8,
+rng: std.Random.DefaultPrng,
 
 const Self = @This();
 
@@ -74,8 +75,10 @@ pub fn init(
     };
 
     var lock = std.Io.RwLock.init;
-    var entropy: [TlsClient.Options.entropy_len]u8 = undefined;
+    var entropy: [8 + TlsClient.Options.entropy_len]u8 = undefined;
     io.random(&entropy);
+    const seed = std.mem.readInt(u64, entropy[0..8], .little);
+    self.rng = .init(seed);
 
     self.client = try TlsClient.init(
         &self.tcp_reader.interface,
@@ -90,7 +93,7 @@ pub fn init(
             } },
             .read_buffer = buffers.tls_read,
             .write_buffer = buffers.tls_write,
-            .entropy = &entropy,
+            .entropy = entropy[8..],
             .realtime_now = now,
             .allow_truncation_attacks = true,
         },
@@ -285,8 +288,8 @@ fn receiveDataPayload(self: *Self, first: Header, first_length: u64) ![]u8 {
 }
 
 pub fn send(self: *Self, message: Message) !void {
-    // TODO: use prng to generate mask
-    const mask = [_]u8{ 1, 2, 3, 4 };
+    var mask: [4]u8 = undefined;
+    self.rng.fill(&mask);
 
     var length_buffer: [8]u8 = undefined;
     const length = message.payloadLength(&length_buffer);
