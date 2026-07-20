@@ -74,11 +74,13 @@ pub fn init(
         break :blk &default_bundle;
     };
 
-    var lock = std.Io.RwLock.init;
-    var entropy: [8 + TlsClient.Options.entropy_len]u8 = undefined;
+    var entropy: [8 + 16 + TlsClient.Options.entropy_len]u8 = undefined;
     io.random(&entropy);
     const seed = std.mem.readInt(u64, entropy[0..8], .little);
     self.rng = .init(seed);
+    const key = entropy[8 .. 8 + 16];
+
+    var lock = std.Io.RwLock.init;
 
     self.client = try TlsClient.init(
         &self.tcp_reader.interface,
@@ -93,22 +95,24 @@ pub fn init(
             } },
             .read_buffer = buffers.tls_read,
             .write_buffer = buffers.tls_write,
-            .entropy = entropy[8..],
+            .entropy = entropy[8 + 16 ..],
             .realtime_now = now,
             .allow_truncation_attacks = true,
         },
     );
 
-    // TODO: generate and send a real key
+    var key_base64: [24]u8 = undefined;
+    _ = std.base64.standard.Encoder.encode(&key_base64, key);
+
     try self.client.writer.print(
         "GET / HTTP/1.1\r\n" ++
             "Host: {s}\r\n" ++
             "Upgrade: websocket\r\n" ++
             "Connection: Upgrade\r\n" ++
             "Sec-WebSocket-Version: 13\r\n" ++
-            "Sec-WebSocket-Key: zig+test+zig+test+zig+==\r\n" ++
+            "Sec-WebSocket-Key: {s}\r\n" ++
             "\r\n",
-        .{options.host},
+        .{ options.host, key_base64 },
     );
     try self.client.writer.flush();
     try self.tcp_writer.interface.flush();
