@@ -3,17 +3,6 @@ const Kalshi = @import("Kalshi.zig");
 const secrets = @import("secrets.zig");
 const types = @import("types.zig");
 
-const subscribe =
-    \\ {
-    \\   "id": 1,
-    \\   "cmd": "subscribe",
-    \\   "params": {
-    \\     "channels": ["trade"],
-    \\     "market_tickers": ["KXWTAMATCH-26JUL20BLIBEJ-BLI"]
-    \\   }
-    \\ }
-;
-
 pub fn main(init: std.process.Init) !void {
     var kalshi = try Kalshi.init(init.gpa, init.io, .{
         .key_id = secrets.key_id,
@@ -21,13 +10,14 @@ pub fn main(init: std.process.Init) !void {
     });
     defer kalshi.deinit();
 
-    try kalshi.ws.send(.{ .text = @constCast(subscribe) });
-    try kalshi.run(.{ .ptr = @constCast(&0), .notify = printTrade });
+    const ticker = try types.Ticker.init("KXWTAMATCH-26JUL20BLIBEJ-BLI");
+    const listener: Kalshi.Listener = .{ .ptr = @constCast(&0), .notify = printTrade };
+    try kalshi.subscribe(ticker, listener);
+
+    try kalshi.run();
 }
 
-pub fn printTrade(ptr: *anyopaque, trade: types.Trade) void {
-    _ = ptr;
-
+pub fn printTrade(_: *anyopaque, trade: types.Trade) void {
     var uuid_buf: [types.Uuid.fmt_len]u8 = undefined;
     trade.id.fmt(&uuid_buf);
 

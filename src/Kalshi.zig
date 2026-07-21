@@ -5,6 +5,7 @@ const types = @import("types.zig");
 
 gpa: Allocator,
 ws: *WebSocket,
+subscriptions: types.TickerHashMap(std.ArrayList(Listener)),
 
 const Self = @This();
 
@@ -52,27 +53,66 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) !Self {
     return .{
         .gpa = gpa,
         .ws = ws,
+        .subscriptions = .empty,
     };
 }
 
 pub fn deinit(self: *Self) void {
     self.ws.deinit();
     self.gpa.destroy(self.ws);
+    var it = self.subscriptions.iterator();
+    while (it.next()) |e| e.value_ptr.deinit(self.gpa);
+    self.subscriptions.deinit(self.gpa);
     self.* = undefined;
 }
 
-pub fn run(self: *Self, listener: Listener) !void {
+pub fn subscribe(self: *Self, ticker: types.Ticker, listener: Listener) !void {
+    const template =
+        \\ {{
+        \\   "id": 1,
+        \\   "cmd": "subscribe",
+        \\   "params": {{
+        \\     "channels": ["trade"],
+        \\     "market_tickers": ["{s}"]
+        \\   }}
+        \\ }}
+    ;
+    if (self.subscriptions.getPtr(ticker)) |a| {
+        try a.append(self.gpa, listener);
+    } else {
+        // TODO: check response?
+        var buf: [template.len + types.Ticker.max_len]u8 = undefined;
+        const message = std.fmt.bufPrint(&buf, template, .{ticker.get()}) catch unreachable;
+        try self.ws.send(.{ .text = @constCast(message) });
+        var array: std.ArrayList(Listener) = .empty;
+        try array.append(self.gpa, listener);
+        try self.subscriptions.put(self.gpa, ticker, array);
+    }
+}
+
+pub fn run(self: *Self) !void {
     while (true) {
         const message = try self.ws.receive();
         defer message.deinit(self.gpa);
-        if (message != .text) continue; // TODO
 
-        const msg_type = try getMessageType(self.gpa, message.text);
-        if (msg_type != .trade) continue; // TODO
+        switch (message) {
+            .text => |msg| try self.handleMessage(msg),
+            .ping => |payload| try self.ws.send(.{ .pong = payload }),
+            else => {}, // TODO
+        }
+    }
+}
 
-        const trade = try types.Trade.parse(self.gpa, message.text);
+fn handleMessage(self: *Self, message: []const u8) !void {
+    const msg_type = try getMessageType(self.gpa, message);
+    if (msg_type != .trade) return; // TODO
 
-        listener.notify(listener.ptr, trade);
+    const trade = try types.Trade.parse(self.gpa, message);
+
+    if (self.subscriptions.getPtr(trade.ticker)) |p| {
+        for (p.items) |listener| {
+            listener.notify(listener.ptr, trade);
+        }
     }
 }
 
@@ -91,6 +131,7 @@ fn getMessageType(gpa: Allocator, json: []const u8) !MessageType {
 const MessageType = enum {
     subscribed,
     trade,
+    @"error",
     unknown,
 };
 

@@ -48,6 +48,7 @@ pub const Ticker = struct {
     len: u8,
 
     pub fn init(ticker: []const u8) !Ticker {
+        // TODO: more validation?
         if (ticker.len > max_len) return error.TickerOversize;
         var buffer: [max_len]u8 = undefined;
         @memcpy(buffer[0..ticker.len], ticker);
@@ -58,6 +59,23 @@ pub const Ticker = struct {
         return self.buffer[0..self.len];
     }
 };
+
+pub fn TickerHashMap(comptime V: type) type {
+    return std.HashMapUnmanaged(
+        Ticker,
+        V,
+        struct {
+            pub fn hash(_: @This(), t: Ticker) u64 {
+                return std.hash_map.hashString(t.get());
+            }
+
+            pub fn eql(_: @This(), a: Ticker, b: Ticker) bool {
+                return std.hash_map.eqlString(a.get(), b.get());
+            }
+        },
+        std.hash_map.default_max_load_percentage,
+    );
+}
 
 pub const Side = enum { yes, no };
 
