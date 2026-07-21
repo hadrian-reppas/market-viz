@@ -1,7 +1,9 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const WebSocket = @import("WebSocket.zig");
+const types = @import("types.zig");
 
-gpa: std.mem.Allocator,
+gpa: Allocator,
 ws: *WebSocket,
 
 const Self = @This();
@@ -11,17 +13,21 @@ pub const Options = struct {
     private_key_pem: []const u8,
 };
 
-pub fn init(gpa: std.mem.Allocator, io: std.Io, options: Options) !Self {
+pub const Listener = struct {
+    ptr: *anyopaque,
+    notify: *const fn (*anyopaque, types.Trade) void,
+};
+
+pub fn init(gpa: Allocator, io: std.Io, options: Options) !Self {
+    const message_fmt = "{}GET/trade-api/ws/v2";
+
     const now = std.Io.Clock.real.now(io).toMilliseconds();
 
-    var message_buffer: [32]u8 = undefined;
-    const message = std.fmt.bufPrint(
-        &message_buffer,
-        "{}GET/trade-api/ws/v2",
-        .{now},
-    ) catch unreachable;
+    const max_size = comptime std.fmt.count(message_fmt, .{std.math.maxInt(@TypeOf(now))});
+    var message_buffer: [max_size]u8 = undefined;
+    const message = std.fmt.bufPrint(&message_buffer, message_fmt, .{now}) catch unreachable;
 
-    var timestamp_buffer: [16]u8 = undefined;
+    var timestamp_buffer: [max_size]u8 = undefined;
     const timestamp_len = std.fmt.printInt(&timestamp_buffer, now, 10, .lower, .{});
     const timestamp = timestamp_buffer[0..timestamp_len];
 
@@ -54,6 +60,39 @@ pub fn deinit(self: *Self) void {
     self.gpa.destroy(self.ws);
     self.* = undefined;
 }
+
+pub fn run(self: *Self, listener: Listener) !void {
+    while (true) {
+        const message = try self.ws.receive();
+        defer message.deinit(self.gpa);
+        if (message != .text) continue; // TODO
+
+        const msg_type = try getMessageType(self.gpa, message.text);
+        if (msg_type != .trade) continue; // TODO
+
+        const trade = try types.Trade.parse(self.gpa, message.text);
+
+        listener.notify(listener.ptr, trade);
+    }
+}
+
+fn getMessageType(gpa: Allocator, json: []const u8) !MessageType {
+    const parsed = try std.json.parseFromSlice(
+        struct { type: []const u8 },
+        gpa,
+        json,
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+
+    return std.meta.stringToEnum(MessageType, parsed.value.type) orelse .unknown;
+}
+
+const MessageType = enum {
+    subscribed,
+    trade,
+    unknown,
+};
 
 fn signMessage(private_key_pem: []const u8, message: []const u8) ![256]u8 {
     const c = @cImport({
