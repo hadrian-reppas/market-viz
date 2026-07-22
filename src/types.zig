@@ -17,7 +17,7 @@ pub const Trade = struct {
     no_price: FixedPoint,
     size: FixedPoint,
     taker_side: Side,
-    ts: u64,
+    ts: Ts,
 
     pub fn parse(gpa: std.mem.Allocator, json: []const u8) !Trade {
         const parsed = try std.json.parseFromSlice(
@@ -41,6 +41,8 @@ pub const Trade = struct {
     }
 };
 
+pub const Ts = u64;
+
 pub const Ticker = struct {
     pub const max_len = 64;
 
@@ -55,6 +57,7 @@ pub const Ticker = struct {
         return .{ .buffer = buffer, .len = @intCast(ticker.len) };
     }
 
+    // TODO: rename to str()
     pub fn get(self: *const Ticker) []const u8 {
         return self.buffer[0..self.len];
     }
@@ -79,6 +82,12 @@ pub fn TickerHashMap(comptime V: type) type {
 
 pub const Side = enum { yes, no };
 
+// TODO: replace with
+//   fn FixedPoint(unit: []const u8, digits: u8) type;
+//   const Price = FixedPoint("ten_thousandths", 4);
+//   const Size = FixedPoint("hundredths", 2);
+//   const Notional = FixedPoint("millionths", 6);
+
 pub const Scale = enum(u8) {
     ones = 0,
     tenths = 1,
@@ -92,14 +101,35 @@ pub const Scale = enum(u8) {
         return std.math.powi(u64, 10, @intFromEnum(self)) catch unreachable;
     }
 
+    pub fn coeffTo(self: Scale, other: Scale) u64 {
+        const si = @intFromEnum(self);
+        const oi = @intFromEnum(other);
+        std.debug.assert(oi >= si);
+        return std.enums.fromInt(Scale, oi - si).?.coeff();
+    }
+
     pub fn next(self: Scale) ?Scale {
         return std.enums.fromInt(Scale, @intFromEnum(self) + 1);
+    }
+
+    pub fn max(a: Scale, b: Scale) Scale {
+        const ai = @intFromEnum(a);
+        const bi = @intFromEnum(b);
+        return std.enums.fromInt(Scale, @max(ai, bi)).?;
+    }
+
+    pub fn add(a: Scale, b: Scale) ?Scale {
+        const ai = @intFromEnum(a);
+        const bi = @intFromEnum(b);
+        return std.enums.fromInt(Scale, ai + bi);
     }
 };
 
 pub const FixedPoint = struct {
     const Value = u64;
-    pub const fmt_len = std.fmt.count(".{:07}", .{std.math.maxInt(Value)});
+    pub const buf_len = std.fmt.count(".{:07}", .{std.math.maxInt(Value)});
+    pub const zero: FixedPoint = .{ .value = 0, .scale = .ones };
+    pub const one: FixedPoint = .{ .value = 1, .scale = .ones };
 
     value: Value,
     scale: Scale,
@@ -129,7 +159,7 @@ pub const FixedPoint = struct {
         return value / coeff;
     }
 
-    pub fn fmt(self: FixedPoint, buf: *[fmt_len]u8) []const u8 {
+    pub fn fmt(self: FixedPoint, buf: *[buf_len]u8) []const u8 {
         var value = std.fmt.bufPrint(buf, "{:07}", .{self.value}) catch unreachable;
         if (self.scale != .ones) {
             const n = @intFromEnum(self.scale);
@@ -144,6 +174,58 @@ pub const FixedPoint = struct {
             value = value[1..];
         }
         return value;
+    }
+
+    pub fn print(self: FixedPoint, w: *std.Io.Writer) !void {
+        var buf: [buf_len]u8 = undefined;
+        const str = self.fmt(&buf);
+        try w.writeAll(str);
+    }
+
+    pub fn eql(a: FixedPoint, b: FixedPoint) bool {
+        std.debug.assert(a.value == 0 or b.value == 0); // TODO
+        return a.value == b.value;
+    }
+
+    fn simpleBinary(comptime f: fn (Value, Value) Value) fn (FixedPoint, FixedPoint) FixedPoint {
+        return struct {
+            fn inner(a: FixedPoint, b: FixedPoint) FixedPoint {
+                var a_mut = a;
+                var b_mut = b;
+                FixedPoint.unify(&a_mut, &b_mut);
+                return .{ .value = f(a_mut.value, b_mut.value), .scale = a_mut.scale };
+            }
+        }.inner;
+    }
+
+    pub const min = simpleBinary(struct {
+        fn inner(a: Value, b: Value) Value {
+            return @min(a, b);
+        }
+    }.inner);
+
+    pub const max = simpleBinary(struct {
+        fn inner(a: Value, b: Value) Value {
+            return @max(a, b);
+        }
+    }.inner);
+
+    pub const add = simpleBinary(struct {
+        fn inner(a: Value, b: Value) Value {
+            return a + b;
+        }
+    }.inner);
+
+    pub fn mul(a: FixedPoint, b: FixedPoint) FixedPoint {
+        return .{ .value = a.value * b.value, .scale = a.scale.add(b.scale).? };
+    }
+
+    fn unify(a: *FixedPoint, b: *FixedPoint) void {
+        const scale = a.scale.max(b.scale);
+        a.value *= a.scale.coeffTo(scale);
+        a.scale = scale;
+        b.value *= b.scale.coeffTo(scale);
+        b.scale = scale;
     }
 };
 
