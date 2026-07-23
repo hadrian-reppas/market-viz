@@ -12,6 +12,10 @@ const Self = @This();
 pub const Options = struct {
     key_id: []const u8,
     private_key_pem: []const u8,
+    host: []const u8 = "external-api-ws.kalshi.com",
+    port: u16 = 443,
+    path: []const u8 = "/trade-api/ws/v2",
+    bundle: ?*std.crypto.Certificate.Bundle = null,
 };
 
 pub const Listener = struct {
@@ -45,9 +49,11 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) !Self {
     const ws = try gpa.create(WebSocket);
     errdefer gpa.destroy(ws);
     try ws.init(gpa, io, .{
-        .host = "external-api-ws.kalshi.com",
-        .path = "/trade-api/ws/v2",
+        .host = options.host,
+        .port = options.port,
+        .path = options.path,
         .extra_headers = headers,
+        .bundle = options.bundle,
     });
 
     return .{

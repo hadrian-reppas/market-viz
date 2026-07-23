@@ -5,53 +5,31 @@ const types = @import("types.zig");
 const Collator = @import("Collator.zig");
 
 pub fn main(init: std.process.Init) !void {
-    var kalshi = try Kalshi.init(init.gpa, init.io, .{
+    const gpa = init.gpa;
+    const io = init.io;
+
+    var bundle: std.crypto.Certificate.Bundle = .{ .map = .empty, .bytes = .empty };
+    defer bundle.deinit(gpa);
+    const now = std.Io.Clock.real.now(io);
+    try bundle.addCertsFromFilePath(gpa, io, now, std.Io.Dir.cwd(), "rootCA.pem");
+
+    var kalshi = try Kalshi.init(gpa, io, .{
         .key_id = secrets.key_id,
         .private_key_pem = secrets.private_key_pem,
+        .host = "localhost",
+        .port = 8443,
+        .path = "/",
+        .bundle = &bundle,
     });
     defer kalshi.deinit();
 
     var collator = try Collator.init(init.gpa, 20, .@"1m");
 
-    // const ticker = try types.Ticker.init("KXNEXTTEAMNBA-26LJAM-MIA");
     const ticker = try types.Ticker.init("KXMLBGAME-26JUL221335PITNYY-PIT");
     try kalshi.subscribe(ticker, collator.listener());
 
     try kalshi.run();
 }
-
-// fn printTrade(_: *anyopaque, trade: types.Trade) void {
-//     var uuid_buf: [types.Uuid.fmt_len]u8 = undefined;
-//     trade.id.fmt(&uuid_buf);
-
-//     var yes_buf: [types.FixedPoint.fmt_len]u8 = undefined;
-//     var no_buf: [types.FixedPoint.fmt_len]u8 = undefined;
-//     var size_buf: [types.FixedPoint.fmt_len]u8 = undefined;
-//     const yes = trade.yes_price.fmt(&yes_buf);
-//     const no = trade.no_price.fmt(&no_buf);
-//     const size = trade.size.fmt(&size_buf);
-
-//     std.debug.print(
-//         \\Trade {{
-//         \\  id: {s},
-//         \\  ticker: {s},
-//         \\  yes_price: {s},
-//         \\  no_price: {s},
-//         \\  size: {s},
-//         \\  taker_side: {},
-//         \\  ts: {},
-//         \\}}
-//         \\
-//     , .{
-//         uuid_buf,
-//         trade.ticker.get(),
-//         yes,
-//         no,
-//         size,
-//         trade.taker_side,
-//         trade.ts,
-//     });
-// }
 
 test {
     _ = types;
