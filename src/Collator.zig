@@ -46,6 +46,13 @@ pub fn touch(self: *Self, ts: t.Ts) void {
     self.head = new_head;
 }
 
+pub fn realloc(self: *Self, gpa: std.mem.Allocator, n: usize) !void {
+    _ = self;
+    _ = gpa;
+    _ = n;
+    @panic("todo");
+}
+
 pub fn listener(self: *Self) Listener {
     return .{ .ptr = self, .notify = insertTrade };
 }
@@ -94,20 +101,20 @@ const Bucket = struct {
     start: t.Ts,
     open: t.Price,
     close: t.Price,
-    min: t.Price,
-    max: t.Price,
+    low: t.Price,
+    high: t.Price,
     volume: t.Size,
-    vwtp: t.Notional,
+    notional: t.Notional,
 
     pub fn init(start: t.Ts) Bucket {
         return .{
             .start = start,
             .open = .zero,
             .close = .zero,
-            .min = .one,
-            .max = .zero,
+            .low = .one,
+            .high = .zero,
             .volume = .zero,
-            .vwtp = .zero,
+            .notional = .zero,
         };
     }
 
@@ -115,10 +122,10 @@ const Bucket = struct {
         if (self.volume.eql(.zero))
             self.open = price;
         self.close = price;
-        self.min = self.min.min(price);
-        self.max = self.max.max(price);
+        self.low = self.low.min(price);
+        self.high = self.high.max(price);
         self.volume = self.volume.add(size);
-        self.vwtp = self.vwtp.add(price.mul(size));
+        self.notional = self.notional.add(price.mul(size));
     }
 
     pub fn print(self: *const Bucket, w: *std.Io.Writer) !void {
@@ -131,14 +138,14 @@ const Bucket = struct {
         try self.open.print(w);
         try w.writeAll(", close = ");
         try self.close.print(w);
-        try w.writeAll(", min = ");
-        try self.min.print(w);
-        try w.writeAll(", max = ");
-        try self.max.print(w);
+        try w.writeAll(", low = ");
+        try self.low.print(w);
+        try w.writeAll(", high = ");
+        try self.high.print(w);
         try w.writeAll(", volume = ");
         try self.volume.print(w);
-        try w.writeAll(", vwtp = ");
-        try self.vwtp.print(w);
+        try w.writeAll(", notional = ");
+        try self.notional.print(w);
         try w.writeAll(" }");
     }
 };
