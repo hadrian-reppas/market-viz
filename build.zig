@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) void {
         .root_module = module,
     });
     exe.root_module.linkSystemLibrary("crypto", .{});
+    exe.root_module.linkSystemLibrary("SDL3", .{});
     b.installArtifact(exe);
 
     const run_exe = b.addRunArtifact(exe);
