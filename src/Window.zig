@@ -3,6 +3,7 @@ const c = @cImport({
     @cInclude("SDL3/SDL.h");
 });
 
+draw: *const fn (Canvas) void,
 window: *c.SDL_Window,
 renderer: *c.SDL_Renderer,
 texture: *c.SDL_Texture,
@@ -17,6 +18,7 @@ pub const Mode = union(enum) {
 };
 
 pub const Options = struct {
+    draw: *const fn (Canvas) void,
     name: [:0]const u8 = "MarketViz",
     mode: Mode = .fullscreen,
     resizeable: bool = false,
@@ -34,6 +36,7 @@ pub fn init(options: Options) !Self {
     if (options.resizeable)
         flags |= c.SDL_WINDOW_RESIZABLE;
 
+    // TODO: set minimum window size if resizable
     const initial_width, const initial_height = switch (options.mode) {
         .fullscreen => .{ 1280, 720 },
         .windowed => |size| .{ size.width, size.height },
@@ -66,6 +69,7 @@ pub fn init(options: Options) !Self {
     errdefer c.SDL_DestroyTexture(texture);
 
     return .{
+        .draw = options.draw,
         .window = window,
         .renderer = renderer,
         .texture = texture,
@@ -127,7 +131,19 @@ pub fn run(self: *Self) !void {
         var pitch: c_int = undefined;
         try expect(c.SDL_LockTexture(self.texture, null, &pixels, &pitch));
 
-        drawFrame(@ptrCast(pixels.?), @intCast(self.width), @intCast(self.height));
+        const canvas: Canvas = .{
+            .pixels = @ptrCast(pixels.?),
+            .width = @intCast(self.width),
+            .height = @intCast(self.height),
+        };
+
+        const start = std.Io.Clock.real.now(std.Options.debug_io);
+        self.draw(canvas);
+        const end = std.Io.Clock.real.now(std.Options.debug_io);
+        std.debug.print(
+            "draw took {}us (pixels = {*})\n",
+            .{ end.toMicroseconds() - start.toMicroseconds(), pixels },
+        );
 
         c.SDL_UnlockTexture(self.texture);
         try expect(c.SDL_RenderClear(self.renderer));
@@ -136,24 +152,70 @@ pub fn run(self: *Self) !void {
     }
 }
 
-fn drawFrame(pixels: [*]u8, width: usize, height: usize) void {
-    const grid_size = 40;
+pub const Color = [4]u8;
 
-    for (0..height) |i| {
-        for (0..width) |j| {
-            const index = 4 * (j + width * i);
-            const pixel = pixels[index .. index + 4];
+pub const Rectangle = struct {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+};
 
-            const x = j / grid_size;
-            const y = i / grid_size;
+pub const Canvas = struct {
+    pixels: [*]u8,
+    width: usize,
+    height: usize,
 
-            const parity = (x + y) % 2;
-            const color: u8 = @intCast(255 * parity);
+    pub fn set(self: Canvas, x: usize, y: usize, color: Color) void {
+        if (x >= self.width or y >= self.height) return;
+        const index = 4 * (x + y * self.width);
+        const pixel = self.pixels[index..][0..4];
+        @memcpy(pixel, &color);
+    }
 
-            pixel[0] = color;
-            pixel[1] = color;
-            pixel[2] = color;
-            pixel[3] = 255;
+    pub fn frame(self: Canvas, rect: Rectangle) Frame {
+        return .{ .canvas = self, .frame = rect };
+    }
+
+    pub fn frameFull(self: Canvas) Frame {
+        return .{
+            .canvas = self,
+            .frame = .{
+                .x = 0,
+                .y = 0,
+                .width = self.width,
+                .height = self.height,
+            },
+        };
+    }
+};
+
+pub const Frame = struct {
+    canvas: Canvas,
+    frame: Rectangle,
+
+    pub fn set(self: Frame, x: usize, y: usize, color: Color) void {
+        if (x >= self.frame.width or y >= self.frame.height) return;
+        self.canvas.set(self.frame.x + x, self.frame.y + y, color);
+    }
+
+    pub fn rectangle(self: Frame, rect: Rectangle, color: Color) void {
+        for (0..rect.height) |i| {
+            for (0..rect.width) |j| {
+                self.set(rect.x + j, rect.y + i, color);
+            }
         }
     }
-}
+
+    pub fn fill(self: Frame, color: Color) void {
+        self.rectangle(
+            .{
+                .x = 0,
+                .y = 0,
+                .width = self.frame.width,
+                .height = self.frame.height,
+            },
+            color,
+        );
+    }
+};
