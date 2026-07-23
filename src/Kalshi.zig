@@ -82,7 +82,7 @@ pub fn subscribe(self: *Self, ticker: types.Ticker, listener: Listener) !void {
     } else {
         // TODO: check response?
         var buf: [template.len + types.Ticker.max_len]u8 = undefined;
-        const message = std.fmt.bufPrint(&buf, template, .{ticker.get()}) catch unreachable;
+        const message = std.fmt.bufPrint(&buf, template, .{ticker.str()}) catch unreachable;
         try self.ws.send(.{ .text = @constCast(message) });
         var array: std.ArrayList(Listener) = .empty;
         try array.append(self.gpa, listener);

@@ -1,9 +1,6 @@
 const std = @import("std");
-const types = @import("types.zig");
+const t = @import("types.zig");
 const Listener = @import("Kalshi.zig").Listener;
-
-const FixedPoint = types.FixedPoint;
-const Ts = types.Ts;
 
 buckets: []Bucket,
 resolution: Resolution,
@@ -21,7 +18,7 @@ pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
     gpa.free(self.buckets);
 }
 
-fn indexOf(self: *Self, ts: Ts) usize {
+fn indexOf(self: *Self, ts: t.Ts) usize {
     return ts / self.resolution.toMilliseconds();
 }
 
@@ -29,13 +26,13 @@ fn get(self: *Self, index: usize) *Bucket {
     return &self.buckets[index % self.buckets.len];
 }
 
-pub fn insert(self: *Self, ts: Ts, price: FixedPoint, size: FixedPoint) void {
+pub fn insert(self: *Self, ts: t.Ts, price: t.Price, size: t.Size) void {
     self.touch(ts);
     const index = self.indexOf(ts);
     self.get(index).insert(price, size);
 }
 
-pub fn touch(self: *Self, ts: Ts) void {
+pub fn touch(self: *Self, ts: t.Ts) void {
     const new_head = self.indexOf(ts);
     for (0..self.buckets.len) |i| {
         const expected = (new_head - i) * self.resolution.toMilliseconds();
@@ -53,7 +50,7 @@ pub fn listener(self: *Self) Listener {
     return .{ .ptr = self, .notify = insertTrade };
 }
 
-fn insertTrade(ptr: *anyopaque, trade: types.Trade) void {
+fn insertTrade(ptr: *anyopaque, trade: t.Trade) void {
     const collator: *Self = @ptrCast(@alignCast(ptr));
     collator.insert(trade.ts, trade.yes_price, trade.size);
 
@@ -78,7 +75,7 @@ pub const Resolution = enum {
     @"30m",
     @"1h",
 
-    pub fn toMilliseconds(self: Resolution) Ts {
+    pub fn toMilliseconds(self: Resolution) t.Ts {
         return switch (self) {
             .@"1s" => 1000,
             .@"5s" => 5 * 1000,
@@ -94,15 +91,15 @@ pub const Resolution = enum {
 };
 
 const Bucket = struct {
-    start: Ts,
-    open: FixedPoint,
-    close: FixedPoint,
-    min: FixedPoint,
-    max: FixedPoint,
-    volume: FixedPoint,
-    vwtp: FixedPoint,
+    start: t.Ts,
+    open: t.Price,
+    close: t.Price,
+    min: t.Price,
+    max: t.Price,
+    volume: t.Size,
+    vwtp: t.Notional,
 
-    pub fn init(start: Ts) Bucket {
+    pub fn init(start: t.Ts) Bucket {
         return .{
             .start = start,
             .open = .zero,
@@ -114,8 +111,8 @@ const Bucket = struct {
         };
     }
 
-    pub fn insert(self: *Bucket, price: FixedPoint, size: FixedPoint) void {
-        if (self.open.eql(.zero))
+    pub fn insert(self: *Bucket, price: t.Price, size: t.Size) void {
+        if (self.volume.eql(.zero))
             self.open = price;
         self.close = price;
         self.min = self.min.min(price);

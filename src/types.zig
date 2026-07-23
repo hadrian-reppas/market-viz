@@ -13,9 +13,9 @@ pub const Trade = struct {
 
     id: Uuid,
     ticker: Ticker,
-    yes_price: FixedPoint,
-    no_price: FixedPoint,
-    size: FixedPoint,
+    yes_price: Price,
+    no_price: Price,
+    size: Size,
     taker_side: Side,
     ts: Ts,
 
@@ -39,6 +39,15 @@ pub const Trade = struct {
             .ts = raw.ts_ms,
         };
     }
+
+    pub fn notional(self: Trade, side: Side) Notional {
+        comptime std.debug.assert(Price.scale * Size.scale == Notional.scale);
+        const price = switch (side) {
+            .yes => self.yes_price.value,
+            .no => self.no_price.value,
+        };
+        return .{ .value = price * self.size.value };
+    }
 };
 
 pub const Ts = u64;
@@ -57,8 +66,7 @@ pub const Ticker = struct {
         return .{ .buffer = buffer, .len = @intCast(ticker.len) };
     }
 
-    // TODO: rename to str()
-    pub fn get(self: *const Ticker) []const u8 {
+    pub fn str(self: *const Ticker) []const u8 {
         return self.buffer[0..self.len];
     }
 };
@@ -69,11 +77,11 @@ pub fn TickerHashMap(comptime V: type) type {
         V,
         struct {
             pub fn hash(_: @This(), t: Ticker) u64 {
-                return std.hash_map.hashString(t.get());
+                return std.hash_map.hashString(t.str());
             }
 
             pub fn eql(_: @This(), a: Ticker, b: Ticker) bool {
-                return std.hash_map.eqlString(a.get(), b.get());
+                return std.hash_map.eqlString(a.str(), b.str());
             }
         },
         std.hash_map.default_max_load_percentage,
@@ -82,152 +90,108 @@ pub fn TickerHashMap(comptime V: type) type {
 
 pub const Side = enum { yes, no };
 
-// TODO: replace with
-//   fn FixedPoint(unit: []const u8, digits: u8) type;
-//   const Price = FixedPoint("ten_thousandths", 4);
-//   const Size = FixedPoint("hundredths", 2);
-//   const Notional = FixedPoint("millionths", 6);
+pub fn FixedPoint(n: u8) type {
+    return struct {
+        const Value = u64;
+        pub const buf_len = std.fmt.count(".{}", .{std.math.maxInt(Value)});
+        pub const digits = n;
+        pub const scale = std.math.powi(Value, 10, digits) catch unreachable;
+        pub const zero: Self = .{ .value = 0 };
+        pub const one: Self = .{ .value = scale };
 
-pub const Scale = enum(u8) {
-    ones = 0,
-    tenths = 1,
-    hundredths = 2,
-    thousandths = 3,
-    ten_thousandths = 4,
-    hundred_thousandths = 5,
-    millionths = 6,
+        value: Value,
 
-    pub fn coeff(self: Scale) u64 {
-        return std.math.powi(u64, 10, @intFromEnum(self)) catch unreachable;
-    }
+        const Self = @This();
 
-    pub fn coeffTo(self: Scale, other: Scale) u64 {
-        const si = @intFromEnum(self);
-        const oi = @intFromEnum(other);
-        std.debug.assert(oi >= si);
-        return std.enums.fromInt(Scale, oi - si).?.coeff();
-    }
-
-    pub fn next(self: Scale) ?Scale {
-        return std.enums.fromInt(Scale, @intFromEnum(self) + 1);
-    }
-
-    pub fn max(a: Scale, b: Scale) Scale {
-        const ai = @intFromEnum(a);
-        const bi = @intFromEnum(b);
-        return std.enums.fromInt(Scale, @max(ai, bi)).?;
-    }
-
-    pub fn add(a: Scale, b: Scale) ?Scale {
-        const ai = @intFromEnum(a);
-        const bi = @intFromEnum(b);
-        return std.enums.fromInt(Scale, ai + bi);
-    }
-};
-
-pub const FixedPoint = struct {
-    const Value = u64;
-    pub const buf_len = std.fmt.count(".{:07}", .{std.math.maxInt(Value)});
-    pub const zero: FixedPoint = .{ .value = 0, .scale = .ones };
-    pub const one: FixedPoint = .{ .value = 1, .scale = .ones };
-
-    value: Value,
-    scale: Scale,
-
-    pub fn parse(buf: []const u8) !FixedPoint {
-        var value: Value = 0;
-        var scale: Scale = .ones;
-        var seen_dot = false;
-        for (buf) |c| {
-            if (c == '.') {
-                if (seen_dot) return error.InvalidFixedPoint;
-                seen_dot = true;
-            } else if ('0' <= c and c <= '9') {
-                if (seen_dot)
-                    scale = scale.next() orelse return error.FixedPointTooPrecise;
-                value = try std.math.add(Value, c - '0', try std.math.mul(Value, value, 10));
-            } else {
-                return error.InvalidCharacter;
+        pub fn parse(bytes: []const u8) !Self {
+            var value: Value = 0;
+            var frac_digits: usize = 0;
+            var seen_dot = false;
+            for (bytes) |c| {
+                if (c == '.' and !seen_dot) {
+                    seen_dot = true;
+                    continue;
+                }
+                if (seen_dot) {
+                    frac_digits += 1;
+                    if (frac_digits > digits)
+                        return error.FixedPointTooPrecise;
+                }
+                const d = try std.fmt.charToDigit(c, 10);
+                value = try std.math.add(Value, d, try std.math.mul(Value, value, 10));
             }
+            const unspecified_digits = digits - frac_digits;
+            value = try std.math.mul(Value, value, try std.math.powi(Value, 10, unspecified_digits));
+            return .{ .value = value };
         }
-        return .{ .value = value, .scale = scale };
-    }
 
-    pub fn toFloat(self: FixedPoint, Float: type) Float {
-        const value: Float = @floatFromInt(self.value);
-        const coeff: Float = @floatFromInt(self.scale.coeff());
-        return value / coeff;
-    }
+        pub fn toFloat(self: Self, Float: type) Float {
+            const num: Float = @floatFromInt(self.value);
+            const denom: Float = @floatFromInt(self.value);
+            return num / denom;
+        }
 
-    pub fn fmt(self: FixedPoint, buf: *[buf_len]u8) []const u8 {
-        var value = std.fmt.bufPrint(buf, "{:07}", .{self.value}) catch unreachable;
-        if (self.scale != .ones) {
-            const n = @intFromEnum(self.scale);
-            const dot = value.len - n;
-            const digits = value[dot .. dot + n];
-            const dest = buf[dot + 1 .. dot + n + 1];
-            @memmove(dest, digits);
+        pub fn fmt(self: Self, buf: *[buf_len]u8) []const u8 {
+            const fmt_str = std.fmt.comptimePrint("{{:0{}}}", .{digits + 1});
+            const s = std.fmt.bufPrint(buf, fmt_str, .{self.value}) catch unreachable;
+            const dot = s.len - digits;
+            const frac = buf[dot .. dot + digits];
+            const dest = buf[dot + 1 .. dot + digits + 1];
+            @memmove(dest, frac);
             buf[dot] = '.';
-            value = buf[0 .. value.len + 1];
+            return buf[0 .. s.len + 1];
         }
-        while (value.len > 1 and value[0] == '0' and '0' <= value[1] and value[1] <= '9') {
-            value = value[1..];
+
+        pub fn print(self: Self, w: *std.Io.Writer) !void {
+            var buf: [buf_len]u8 = undefined;
+            const s = self.fmt(&buf);
+            try w.writeAll(s);
         }
-        return value;
-    }
 
-    pub fn print(self: FixedPoint, w: *std.Io.Writer) !void {
-        var buf: [buf_len]u8 = undefined;
-        const str = self.fmt(&buf);
-        try w.writeAll(str);
-    }
-
-    pub fn eql(a: FixedPoint, b: FixedPoint) bool {
-        std.debug.assert(a.value == 0 or b.value == 0); // TODO
-        return a.value == b.value;
-    }
-
-    fn simpleBinary(comptime f: fn (Value, Value) Value) fn (FixedPoint, FixedPoint) FixedPoint {
-        return struct {
-            fn inner(a: FixedPoint, b: FixedPoint) FixedPoint {
-                var a_mut = a;
-                var b_mut = b;
-                FixedPoint.unify(&a_mut, &b_mut);
-                return .{ .value = f(a_mut.value, b_mut.value), .scale = a_mut.scale };
-            }
-        }.inner;
-    }
-
-    pub const min = simpleBinary(struct {
-        fn inner(a: Value, b: Value) Value {
-            return @min(a, b);
+        pub fn eql(a: Self, b: Self) bool {
+            return a.value == b.value;
         }
-    }.inner);
 
-    pub const max = simpleBinary(struct {
-        fn inner(a: Value, b: Value) Value {
-            return @max(a, b);
+        pub fn add(a: Self, b: Self) Self {
+            return .{ .value = a.value + b.value };
         }
-    }.inner);
 
-    pub const add = simpleBinary(struct {
-        fn inner(a: Value, b: Value) Value {
-            return a + b;
+        pub fn min(a: Self, b: Self) Self {
+            return .{ .value = @min(a.value, b.value) };
         }
-    }.inner);
 
-    pub fn mul(a: FixedPoint, b: FixedPoint) FixedPoint {
-        return .{ .value = a.value * b.value, .scale = a.scale.add(b.scale).? };
-    }
+        pub fn max(a: Self, b: Self) Self {
+            return .{ .value = @max(a.value, b.value) };
+        }
 
-    fn unify(a: *FixedPoint, b: *FixedPoint) void {
-        const scale = a.scale.max(b.scale);
-        a.value *= a.scale.coeffTo(scale);
-        a.scale = scale;
-        b.value *= b.scale.coeffTo(scale);
-        b.scale = scale;
-    }
-};
+        pub fn mul(a: Self, b: anytype) FixedPoint(@TypeOf(a).digits + @TypeOf(b).digits) {
+            return .{ .value = a.value * b.value };
+        }
+    };
+}
+
+pub const Price = FixedPoint(4);
+pub const Size = FixedPoint(2);
+pub const Notional = FixedPoint(6);
+
+test "FixedPoint" {
+    var buf: [Size.buf_len]u8 = undefined;
+
+    const size: Size = try .parse("12.34");
+    try std.testing.expectEqualStrings("12.34", size.fmt(&buf));
+    try std.testing.expectEqual(1234, size.value);
+
+    const price: Price = try .parse("99.999");
+    try std.testing.expectEqualStrings("99.9990", price.fmt(&buf));
+    try std.testing.expectEqual(999_990, price.value);
+
+    const size2: Size = try .parse("2");
+    const price2: Price = try .parse("3.");
+    try std.testing.expectEqual(200, size2.value);
+    try std.testing.expectEqual(30_000, price2.value);
+
+    try std.testing.expectError(error.FixedPointTooPrecise, Size.parse("0.123"));
+}
 
 pub const Uuid = struct {
     pub const fmt_len = 36;

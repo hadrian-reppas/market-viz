@@ -11,10 +11,10 @@ pub fn main(init: std.process.Init) !void {
     });
     defer kalshi.deinit();
 
-    var collator = try Collator.init(init.gpa, 10, .@"30s");
+    var collator = try Collator.init(init.gpa, 20, .@"1m");
 
     // const ticker = try types.Ticker.init("KXNEXTTEAMNBA-26LJAM-MIA");
-    const ticker = try types.Ticker.init("KXWTAMATCH-26JUL20WALSHE-WAL");
+    const ticker = try types.Ticker.init("KXMLBGAME-26JUL221335PITNYY-PIT");
     try kalshi.subscribe(ticker, collator.listener());
 
     try kalshi.run();
@@ -52,3 +52,7 @@ pub fn main(init: std.process.Init) !void {
 //         trade.ts,
 //     });
 // }
+
+test {
+    _ = types;
+}
