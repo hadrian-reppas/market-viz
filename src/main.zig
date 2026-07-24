@@ -32,10 +32,10 @@ fn draw(canvas: Window.Canvas) void {
 
     // const frame = canvas.frameFull();
     const frame = canvas.frame(.{
-        .x = 200,
-        .y = 50,
-        .width = 1400,
-        .height = 800,
+        .x = 0,
+        .y = 0,
+        .width = 1280,
+        .height = 720,
     });
 
     frame.fill(.{ 255, 255, 255, 255 });

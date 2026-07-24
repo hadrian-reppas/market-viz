@@ -102,6 +102,8 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn run(self: *Self) !void {
+    var microseconds: [10]i64 = undefined;
+    var i: usize = 0;
     while (true) {
         var event: c.union_SDL_Event = undefined;
         while (c.SDL_PollEvent(&event)) {
@@ -140,10 +142,15 @@ pub fn run(self: *Self) !void {
         const start = std.Io.Clock.real.now(std.Options.debug_io);
         self.draw(canvas);
         const end = std.Io.Clock.real.now(std.Options.debug_io);
-        std.debug.print(
-            "draw took {}us (pixels = {*})\n",
-            .{ end.toMicroseconds() - start.toMicroseconds(), pixels },
-        );
+        microseconds[i] = end.toMicroseconds() - start.toMicroseconds();
+        i += 1;
+
+        if (i == microseconds.len) {
+            i = 0;
+            var sum: i64 = 0;
+            for (microseconds) |m| sum += m;
+            std.debug.print("{}us\n", .{@divFloor(sum, microseconds.len)});
+        }
 
         c.SDL_UnlockTexture(self.texture);
         try expect(c.SDL_RenderClear(self.renderer));
@@ -159,6 +166,16 @@ pub const Rectangle = struct {
     y: usize,
     width: usize,
     height: usize,
+
+    pub fn intersect(a: Rectangle, b: Rectangle) Rectangle {
+        const left = @max(a.x, b.x);
+        const right = @min(a.x + a.width, b.x + b.width);
+        const top = @max(a.y, b.y);
+        const bottom = @min(a.y + a.height, b.y + b.height);
+        const width = if (right >= left) right - left else 0;
+        const height = if (bottom >= top) bottom - top else 0;
+        return .{ .x = left, .y = top, .width = width, .height = height };
+    }
 };
 
 pub const Canvas = struct {
@@ -167,25 +184,33 @@ pub const Canvas = struct {
     height: usize,
 
     pub fn set(self: Canvas, x: usize, y: usize, color: Color) void {
-        if (x >= self.width or y >= self.height) return;
         const index = 4 * (x + y * self.width);
         const pixel = self.pixels[index..][0..4];
         @memcpy(pixel, &color);
     }
 
+    pub fn setMany(self: Canvas, x: usize, y: usize, n: usize, color: Color) void {
+        const index = 4 * (x + y * self.width);
+        const start: [*]u32 = @ptrCast(@alignCast(self.pixels + index));
+        const slice = start[0..n];
+        const int = std.mem.readInt(u32, &color, .native);
+        @memset(slice, int);
+    }
+
     pub fn frame(self: Canvas, rect: Rectangle) Frame {
-        return .{ .canvas = self, .frame = rect };
+        return .{ .canvas = self, .frame = rect.intersect(self.full()) };
     }
 
     pub fn frameFull(self: Canvas) Frame {
+        return .{ .canvas = self, .frame = self.full() };
+    }
+
+    pub fn full(self: Canvas) Rectangle {
         return .{
-            .canvas = self,
-            .frame = .{
-                .x = 0,
-                .y = 0,
-                .width = self.width,
-                .height = self.height,
-            },
+            .x = 0,
+            .y = 0,
+            .width = self.width,
+            .height = self.height,
         };
     }
 };
@@ -196,26 +221,48 @@ pub const Frame = struct {
 
     pub fn set(self: Frame, x: usize, y: usize, color: Color) void {
         if (x >= self.frame.width or y >= self.frame.height) return;
+        self.setUnchecked(x, y, color);
+    }
+
+    pub fn setUnchecked(self: Frame, x: usize, y: usize, color: Color) void {
         self.canvas.set(self.frame.x + x, self.frame.y + y, color);
     }
 
+    pub fn setMany(self: Frame, x: usize, y: usize, n: usize, color: Color) void {
+        if (x >= self.frame.width or y >= self.frame.height) return;
+        self.setManyUnchecked(x, y, @min(n, self.frame.width - x), color);
+    }
+
+    pub fn setManyUnchecked(self: Frame, x: usize, y: usize, n: usize, color: Color) void {
+        self.canvas.setMany(
+            self.frame.x + x,
+            self.frame.y + y,
+            @min(n, self.frame.width - x),
+            color,
+        );
+    }
+
     pub fn rectangle(self: Frame, rect: Rectangle, color: Color) void {
+        const intersection = rect.intersect(self.full());
+        self.rectangleUnchecked(intersection, color);
+    }
+
+    pub fn rectangleUnchecked(self: Frame, rect: Rectangle, color: Color) void {
         for (0..rect.height) |i| {
-            for (0..rect.width) |j| {
-                self.set(rect.x + j, rect.y + i, color);
-            }
+            self.setManyUnchecked(rect.x, rect.y + i, rect.width, color);
         }
     }
 
     pub fn fill(self: Frame, color: Color) void {
-        self.rectangle(
-            .{
-                .x = 0,
-                .y = 0,
-                .width = self.frame.width,
-                .height = self.frame.height,
-            },
-            color,
-        );
+        self.rectangle(self.full(), color);
+    }
+
+    pub fn full(self: Frame) Rectangle {
+        return .{
+            .x = 0,
+            .y = 0,
+            .width = self.frame.width,
+            .height = self.frame.height,
+        };
     }
 };
