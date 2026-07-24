@@ -127,7 +127,7 @@ pub fn FixedPoint(n: u8) type {
 
         pub fn toFloat(self: Self, Float: type) Float {
             const num: Float = @floatFromInt(self.value);
-            const denom: Float = @floatFromInt(self.value);
+            const denom: Float = @floatFromInt(scale);
             return num / denom;
         }
 

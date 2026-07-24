@@ -97,7 +97,7 @@ pub const Resolution = enum {
     }
 };
 
-const Bucket = struct {
+pub const Bucket = struct {
     start: t.Ts,
     open: t.Price,
     close: t.Price,
@@ -119,8 +119,7 @@ const Bucket = struct {
     }
 
     pub fn insert(self: *Bucket, price: t.Price, size: t.Size) void {
-        if (self.volume.eql(.zero))
-            self.open = price;
+        if (self.isEmpty()) self.open = price;
         self.close = price;
         self.low = self.low.min(price);
         self.high = self.high.max(price);
@@ -128,9 +127,13 @@ const Bucket = struct {
         self.notional = self.notional.add(price.mul(size));
     }
 
+    pub fn isEmpty(self: Bucket) bool {
+        return self.volume.eql(.zero);
+    }
+
     pub fn print(self: *const Bucket, w: *std.Io.Writer) !void {
         try w.print(".{{ start = {}", .{self.start});
-        if (self.volume.eql(.zero)) {
+        if (self.isEmpty()) {
             try w.writeAll(" }");
             return;
         }
