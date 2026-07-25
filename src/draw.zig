@@ -11,6 +11,27 @@ pub const Options = struct {
     min_price: t.Price,
 };
 
+fn getCandleLayout(width: usize, n: usize) !struct { usize, usize, usize } {
+    std.debug.assert(n >= 2);
+    if (width < 7 * n - 1) return error.FrameTooSmall;
+
+    const gap = width / (5 * n - 1);
+
+    const available_for_candles = width - (n - 1) * gap;
+    const candle_width = 2 * (available_for_candles / (2 * n));
+
+    const used = n * candle_width + (n - 1) * gap;
+
+    const margin = width - used;
+
+    std.debug.assert(gap >= 1);
+    std.debug.assert(candle_width >= 6);
+    std.debug.assert(candle_width % 2 == 0);
+    std.debug.assert(used <= width);
+
+    return .{ candle_width, gap, margin };
+}
+
 fn getCandleWidth(width: usize, n: usize) !usize {
     std.debug.assert(n >= 2);
     if (width < 7 * n - 1) return error.FrameTooSmall;
@@ -53,7 +74,7 @@ pub fn drawCandles(
     buckets: []const Collator.Bucket,
     options: Options,
 ) void {
-    const candle_width = getCandleWidth(
+    const candle_width, const gap, const margin = getCandleLayout(
         frame.frame.width,
         buckets.len,
     ) catch return;
@@ -66,13 +87,13 @@ pub fn drawCandles(
         .y2 = 0,
     };
 
-    const total_gap_width = frame.frame.width - buckets.len * candle_width;
-    const gap_count = buckets.len - 1;
     for (buckets, 0..) |bucket, i| {
         if (bucket.isEmpty()) continue;
 
-        const gap_width_before =
-            @divFloor(i * total_gap_width + gap_count / 2, gap_count);
+        var x = i * candle_width;
+        if (i > 1) x += (i - 1) * gap;
+        _ = margin;
+
         const open = bucket.open.toFloat(f64);
         const close = bucket.close.toFloat(f64);
         const low = bucket.low.toFloat(f64);
@@ -92,7 +113,6 @@ pub fn drawCandles(
         else
             options.flat_color;
 
-        const x = i * candle_width + gap_width_before;
         frame.rectangle(
             .{ .x = x + wick_offset, .y = @round(wick_top), .width = 2, .height = wick_height },
             color,
@@ -101,10 +121,6 @@ pub fn drawCandles(
             .{ .x = x, .y = @round(candle_top), .width = candle_width, .height = @max(2, candle_height) },
             color,
         );
-
-        if (i == buckets.len - 1) {
-            std.debug.assert(x + candle_width == frame.frame.width);
-        }
     }
 }
 

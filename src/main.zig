@@ -19,7 +19,7 @@ pub fn main() !void {
 fn draw(canvas: Window.Canvas) void {
     const Data = struct { ts: u64, open: u16, close: u16, low: u16, high: u16 };
     const data: []const Data = @import("data.zon");
-    var buckets: [data.len]Collator.Bucket = undefined;
+    var buckets: [100]Collator.Bucket = undefined;
     for (data, 0..) |d, i| {
         if (i >= buckets.len) break;
         buckets[i] = .{
