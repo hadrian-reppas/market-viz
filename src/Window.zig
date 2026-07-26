@@ -3,7 +3,8 @@ const c = @cImport({
     @cInclude("SDL3/SDL.h");
 });
 
-draw: *const fn (Canvas) void,
+userdata: *anyopaque,
+draw: *const fn (*anyopaque, Canvas) void,
 window: *c.SDL_Window,
 renderer: *c.SDL_Renderer,
 texture: *c.SDL_Texture,
@@ -18,7 +19,8 @@ pub const Mode = union(enum) {
 };
 
 pub const Options = struct {
-    draw: *const fn (Canvas) void,
+    userdata: *anyopaque,
+    draw: *const fn (*anyopaque, Canvas) void,
     name: [:0]const u8 = "MarketViz",
     mode: Mode = .fullscreen,
     resizeable: bool = false,
@@ -69,6 +71,7 @@ pub fn init(options: Options) !Self {
     errdefer c.SDL_DestroyTexture(texture);
 
     return .{
+        .userdata = options.userdata,
         .draw = options.draw,
         .window = window,
         .renderer = renderer,
@@ -140,7 +143,7 @@ pub fn run(self: *Self) !void {
         };
 
         const start = std.Io.Clock.real.now(std.Options.debug_io);
-        self.draw(canvas);
+        self.draw(self.userdata, canvas);
         const end = std.Io.Clock.real.now(std.Options.debug_io);
         microseconds[i] = end.toMicroseconds() - start.toMicroseconds();
         i += 1;

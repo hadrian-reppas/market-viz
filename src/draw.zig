@@ -90,9 +90,8 @@ pub fn drawCandles(
     for (buckets, 0..) |bucket, i| {
         if (bucket.isEmpty()) continue;
 
-        var x = i * candle_width;
-        if (i > 1) x += (i - 1) * gap;
-        _ = margin;
+        var x = i * candle_width + margin / 2;
+        if (i > 0) x += (i - 1) * gap;
 
         const open = bucket.open.toFloat(f64);
         const close = bucket.close.toFloat(f64);

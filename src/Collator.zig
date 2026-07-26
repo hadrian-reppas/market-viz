@@ -2,6 +2,7 @@ const std = @import("std");
 const t = @import("types.zig");
 const Listener = @import("Kalshi.zig").Listener;
 
+mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
 buckets: []Bucket,
 resolution: Resolution,
 head: usize,
@@ -16,6 +17,8 @@ pub fn init(gpa: std.mem.Allocator, n: usize, resolution: Resolution) !Self {
 
 pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
     gpa.free(self.buckets);
+    _ = std.c.pthread_mutex_destroy(&self.mutex);
+    self.* = undefined;
 }
 
 fn indexOf(self: *Self, ts: t.Ts) usize {
@@ -24,6 +27,14 @@ fn indexOf(self: *Self, ts: t.Ts) usize {
 
 fn get(self: *Self, index: usize) *Bucket {
     return &self.buckets[index % self.buckets.len];
+}
+
+pub fn lock(self: *Self) void {
+    _ = std.c.pthread_mutex_lock(&self.mutex);
+}
+
+pub fn unlock(self: *Self) void {
+    _ = std.c.pthread_mutex_unlock(&self.mutex);
 }
 
 pub fn insert(self: *Self, ts: t.Ts, price: t.Price, size: t.Size) void {
@@ -46,6 +57,21 @@ pub fn touch(self: *Self, ts: t.Ts) void {
     self.head = new_head;
 }
 
+pub fn copy(self: *Self, buckets: []Bucket) void {
+    const n = @min(self.buckets.len, buckets.len, self.head);
+    const self_start = self.head - n + 1;
+    const buckets_start = self.buckets.len - n;
+    for (0..buckets_start) |i| {
+        buckets[i] = .init(0);
+    }
+    for (0..n) |i| {
+        buckets[buckets_start + i] = self.get(self_start + i).*;
+    }
+    for (n..buckets.len) |i| {
+        buckets[i] = .init(0);
+    }
+}
+
 pub fn realloc(self: *Self, gpa: std.mem.Allocator, n: usize) !void {
     _ = self;
     _ = gpa;
@@ -59,17 +85,21 @@ pub fn listener(self: *Self) Listener {
 
 fn insertTrade(ptr: *anyopaque, trade: t.Trade) void {
     const collator: *Self = @ptrCast(@alignCast(ptr));
+
+    collator.lock();
+    defer collator.unlock();
+
     collator.insert(trade.ts, trade.yes_price, trade.size);
 
     // TODO: remove
-    for (0..collator.buckets.len) |i| {
-        const index = (collator.head - i) % collator.buckets.len;
-        var buf: [999]u8 = undefined;
-        var writer = std.Io.Writer.fixed(&buf);
-        collator.buckets[index].print(&writer) catch unreachable;
-        std.debug.print("{s}\n", .{writer.buffered()});
-    }
-    std.debug.print("\n", .{});
+    // for (0..collator.buckets.len) |i| {
+    //     const index = (collator.head - i) % collator.buckets.len;
+    //     var buf: [999]u8 = undefined;
+    //     var writer = std.Io.Writer.fixed(&buf);
+    //     collator.buckets[index].print(&writer) catch unreachable;
+    //     std.debug.print("{s}\n", .{writer.buffered()});
+    // }
+    // std.debug.print("\n", .{});
 }
 pub const Resolution = enum {
     @"1s",
