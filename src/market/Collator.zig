@@ -1,6 +1,6 @@
 const std = @import("std");
-const t = @import("types.zig");
-const Listener = @import("Kalshi.zig").Listener;
+const t = @import("../network/types.zig");
+const Listener = @import("../network/Kalshi.zig").Listener;
 
 mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
 buckets: []Bucket,

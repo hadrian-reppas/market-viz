@@ -1,9 +1,9 @@
 const std = @import("std");
-const Kalshi = @import("Kalshi.zig");
+const Kalshi = @import("network/Kalshi.zig");
 const secrets = @import("secrets.zig");
-const types = @import("types.zig");
-const Collator = @import("Collator.zig");
-const Window = @import("Window.zig");
+const types = @import("network/types.zig"); // TODO: move to Market
+const Collator = @import("market/Collator.zig");
+const Window = @import("gui/Window.zig");
 
 pub fn main(init: std.process.Init) !void {
     var collator = try Collator.init(init.gpa, 64, .@"5s");
