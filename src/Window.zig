@@ -24,6 +24,8 @@ pub const Options = struct {
     name: [:0]const u8 = "MarketViz",
     mode: Mode = .fullscreen,
     resizeable: bool = false,
+    high_pixel_density: bool = false,
+    borderless: bool = false,
 };
 
 fn expect(ok: bool) !void {
@@ -34,9 +36,13 @@ pub fn init(options: Options) !Self {
     try expect(c.SDL_Init(c.SDL_INIT_VIDEO));
     errdefer c.SDL_Quit();
 
-    var flags = c.SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    var flags: c.SDL_WindowFlags = 0;
     if (options.resizeable)
         flags |= c.SDL_WINDOW_RESIZABLE;
+    if (options.high_pixel_density)
+        flags |= c.SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    if (options.borderless)
+        flags |= c.SDL_WINDOW_BORDERLESS;
 
     // TODO: set minimum window size if resizable
     const initial_width, const initial_height = switch (options.mode) {
@@ -128,6 +134,9 @@ pub fn run(self: *Self) !void {
                         self.height,
                     );
                 },
+                c.SDL_EVENT_KEY_DOWN => {
+                    if (event.key.key == c.SDLK_ESCAPE) return;
+                },
                 else => {},
             }
         }
@@ -163,6 +172,8 @@ pub fn run(self: *Self) !void {
 }
 
 pub const Color = [4]u8;
+pub const Rgb = [3]u8;
+pub const Rgba = [4]u8;
 
 pub const Rectangle = struct {
     x: usize,
