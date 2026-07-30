@@ -67,6 +67,12 @@ pub const Ts = struct {
     pub fn fmtIso8601(self: Ts, buf: *[buf_len]u8) void {
         iso8601.fmtMicroseconds(buf, self.microseconds);
     }
+
+    pub fn print(self: Ts, w: *std.Io.Writer) !void {
+        var buf: [buf_len]u8 = undefined;
+        self.fmtIso8601(&buf);
+        try w.writeAll(&buf);
+    }
 };
 
 pub fn FixedPoint(n: u8) type {
@@ -76,7 +82,7 @@ pub fn FixedPoint(n: u8) type {
         pub const digits = n;
         pub const scale = std.math.powi(Value, 10, digits) catch unreachable;
         pub const zero: Self = .{ .value = 0 };
-        pub const one: Self = .{ .value = scale };
+        pub const inf: Self = .{ .value = std.math.maxInt(Value) };
 
         value: Value,
 
@@ -151,8 +157,8 @@ pub fn FixedPoint(n: u8) type {
             return FixedPoint(A.digits + B.digits);
         }
 
-        pub fn mul(a: anytype, b: anytype) Mul(@TypeOf(a), @TypeOf(b)) {
-            const MulValue = Mul(@TypeOf(a), @TypeOf(b)).Value;
+        pub fn mul(a: Self, b: anytype) Mul(Self, @TypeOf(b)) {
+            const MulValue = Mul(Self, @TypeOf(b)).Value;
             const a_value: MulValue = a.value;
             const b_value: MulValue = b.value;
             return .{ .value = a_value * b_value };

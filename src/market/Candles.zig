@@ -21,7 +21,7 @@ pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
 }
 
 fn indexOf(self: *Self, ts: types.Ts) usize {
-    return ts / self.resolution.toMilliseconds();
+    return ts.microseconds / self.resolution.toMicroseconds();
 }
 
 fn get(self: *Self, index: usize) *Bucket {
@@ -36,46 +36,40 @@ pub fn unlock(self: *Self) void {
     _ = std.c.pthread_mutex_unlock(&self.mutex);
 }
 
+// Consider calling `Candles.lock`
 pub fn insert(self: *Self, ts: types.Ts, price: types.Price, size: types.Size) void {
     self.touch(ts);
     const index = self.indexOf(ts);
     self.get(index).insert(price, size);
 }
 
+// Consider calling `Candles.lock`
 pub fn touch(self: *Self, ts: types.Ts) void {
     const new_head = self.indexOf(ts);
     for (0..self.buckets.len) |i| {
-        const expected = (new_head - i) * self.resolution.toMilliseconds();
+        const expected = (new_head - i) * self.resolution.toMicroseconds();
         const bucket = self.get(new_head - i);
-        if (bucket.start == expected) {
+        if (bucket.start.microseconds == expected) {
             break;
         } else {
-            bucket.* = .init(expected);
+            bucket.* = .init(.{ .microseconds = expected });
         }
     }
     self.head = new_head;
 }
 
-pub fn copy(self: *Self, buckets: []Bucket) void {
-    const n = @min(self.buckets.len, buckets.len, self.head);
-    const self_start = self.head - n + 1;
-    const buckets_start = self.buckets.len - n;
-    for (0..buckets_start) |i| {
-        buckets[i] = .init(.zero);
+// Consider calling `Candles.lock`
+pub fn copy(self: *Self, dest: []Bucket) void {
+    std.debug.assert(self.buckets.len == dest.len);
+    if (self.head == 0) {
+        @memset(dest, .init(.zero));
+        return;
     }
-    for (0..n) |i| {
-        buckets[buckets_start + i] = self.get(self_start + i).*;
-    }
-    for (n..buckets.len) |i| {
-        buckets[i] = .init(.zero);
-    }
-}
 
-pub fn realloc(self: *Self, gpa: std.mem.Allocator, n: usize) !void {
-    _ = self;
-    _ = gpa;
-    _ = n;
-    @panic("todo");
+    const start = self.head - dest.len + 1;
+    for (0..dest.len) |i| {
+        dest[i] = self.get(start + i).*;
+    }
 }
 
 pub fn listener(self: *Self) types.TradeListener {
@@ -83,23 +77,14 @@ pub fn listener(self: *Self) types.TradeListener {
 }
 
 fn insertTrade(ptr: *anyopaque, trade: types.Trade) void {
-    const collator: *Self = @ptrCast(@alignCast(ptr));
+    const candles: *Self = @ptrCast(@alignCast(ptr));
 
-    collator.lock();
-    defer collator.unlock();
+    candles.lock();
+    defer candles.unlock();
 
-    collator.insert(trade.ts, trade.yes_price, trade.size);
-
-    // TODO: remove
-    // for (0..collator.buckets.len) |i| {
-    //     const index = (collator.head - i) % collator.buckets.len;
-    //     var buf: [999]u8 = undefined;
-    //     var writer = std.Io.Writer.fixed(&buf);
-    //     collator.buckets[index].print(&writer) catch unreachable;
-    //     std.debug.print("{s}\n", .{writer.buffered()});
-    // }
-    // std.debug.print("\n", .{});
+    candles.insert(trade.ts, trade.price, trade.size);
 }
+
 pub const Resolution = enum {
     @"1s",
     @"5s",
@@ -111,17 +96,17 @@ pub const Resolution = enum {
     @"30m",
     @"1h",
 
-    pub fn toMilliseconds(self: Resolution) types.Ts {
+    pub fn toMicroseconds(self: Resolution) u64 {
         return switch (self) {
-            .@"1s" => 1000,
-            .@"5s" => 5 * 1000,
-            .@"10s" => 10 * 1000,
-            .@"30s" => 30 * 1000,
-            .@"1m" => 60 * 1000,
-            .@"5m" => 5 * 60 * 1000,
-            .@"10m" => 10 * 60 * 1000,
-            .@"30m" => 30 * 60 * 1000,
-            .@"1h" => 60 * 60 * 1000,
+            .@"1s" => 1_000_000,
+            .@"5s" => 5 * 1_000_000,
+            .@"10s" => 10 * 1_000_000,
+            .@"30s" => 30 * 1_000_000,
+            .@"1m" => 60 * 1_000_000,
+            .@"5m" => 5 * 60 * 1_000_000,
+            .@"10m" => 10 * 60 * 1_000_000,
+            .@"30m" => 30 * 60 * 1_000_000,
+            .@"1h" => 60 * 60 * 1_000_000,
         };
     }
 };
@@ -140,7 +125,7 @@ pub const Bucket = struct {
             .start = start,
             .open = .zero,
             .close = .zero,
-            .low = .one,
+            .low = .inf,
             .high = .zero,
             .volume = .zero,
             .notional = .zero,
@@ -161,7 +146,8 @@ pub const Bucket = struct {
     }
 
     pub fn print(self: *const Bucket, w: *std.Io.Writer) !void {
-        try w.print(".{{ start = {}", .{self.start});
+        try w.writeAll("{ start = ");
+        try self.start.print(w);
         if (self.isEmpty()) {
             try w.writeAll(" }");
             return;
