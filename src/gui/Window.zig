@@ -159,9 +159,9 @@ pub fn run(self: *Self) !void {
 
         if (i == microseconds.len) {
             i = 0;
-            var sum: i64 = 0;
-            for (microseconds) |m| sum += m;
-            std.debug.print("{}us\n", .{@divFloor(sum, microseconds.len)});
+            // var sum: i64 = 0;
+            // for (microseconds) |m| sum += m;
+            // std.debug.print("{}us\n", .{@divFloor(sum, microseconds.len)});
         }
 
         c.SDL_UnlockTexture(self.texture);
