@@ -5,26 +5,44 @@ const secrets = @import("secrets.zig");
 const Collator = @import("market/Collator.zig");
 const Window = @import("gui/Window.zig");
 
+const dummy = 1;
+const types = @import("market/types.zig");
+
+const trade_printer: types.TradeListener = .{ .ptr = @constCast(&dummy), .notify = printTrade };
+const update_printer: types.UpdateListener = .{ .ptr = @constCast(&dummy), .notify = printUpdate };
+
+fn printTrade(_: *anyopaque, trade: types.Trade) void {
+    std.debug.print("trade ({s}) = {}\n", .{ trade.ticker, trade });
+}
+
+fn printUpdate(_: *anyopaque, update: types.Update) void {
+    std.debug.print("update ({s}) = {}\n", .{ update.ticker, update });
+}
+
 pub fn main(init: std.process.Init) !void {
-    // var coinbase = try Coinbase.init(init.gpa, init.io, .{
-    //     .key_id = secrets.coinbase.key_id,
-    //     .private_key_base64 = secrets.coinbase.private_key_base64,
-    // });
-
-    // try coinbase.subscribe();
-    // try coinbase.run();
-
-    var kalshi = try Kalshi.init(init.gpa, init.io, .{
-        .key_id = secrets.kalshi.key_id,
-        .private_key_pem = secrets.kalshi.private_key_pem,
+    var coinbase = try Coinbase.init(init.gpa, init.io, .{
+        .key_id = secrets.coinbase.key_id,
+        .private_key_base64 = secrets.coinbase.private_key_base64,
     });
-    defer kalshi.deinit();
+    defer coinbase.deinit();
+
+    try coinbase.subscribeToTrades("BTC-USD", trade_printer);
+    try coinbase.subscribeToTrades("ETH-USD", trade_printer);
+    try coinbase.subscribeToUpdates("ETH-USD", update_printer);
+    try coinbase.subscribeToUpdates("BTC-USD", update_printer);
+
+    try coinbase.run();
 
     // var collator = try Collator.init(init.gpa, 64, .@"5s");
     // defer collator.deinit(init.gpa);
-    try kalshi.subscribe("KXATPMATCH-26JUL30NAKMEN-NAK");
 
-    try kalshi.run();
+    // var kalshi = try Kalshi.init(init.gpa, init.io, .{
+    //     .key_id = secrets.kalshi.key_id,
+    //     .private_key_pem = secrets.kalshi.private_key_pem,
+    // });
+    // defer kalshi.deinit();
+    // try kalshi.subscribe("KXATPMATCH-26JUL30NAKMEN-NAK");
+    // try kalshi.run();
 
     // if (collator.buckets.len == 64) return;
 

@@ -6,6 +6,8 @@ const types = @import("../market/types.zig");
 gpa: Allocator,
 ws: *WebSocket,
 jwt: []u8,
+trade_subscriptions: std.StringHashMap(std.ArrayList(types.TradeListener)),
+update_subscriptions: std.StringHashMap(std.ArrayList(types.UpdateListener)),
 
 const Self = @This();
 
@@ -41,112 +43,177 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) !Self {
         .gpa = gpa,
         .ws = ws,
         .jwt = try gpa.dupe(u8, jwt),
+        .trade_subscriptions = .init(gpa),
+        .update_subscriptions = .init(gpa),
     };
 }
 
 pub fn deinit(self: *Self) void {
     self.gpa.free(self.jwt);
+
+    self.ws.send(.{ .close = null }) catch {};
     self.ws.deinit();
+    self.gpa.destroy(self.ws);
+
+    deinitHashMap(self.gpa, &self.trade_subscriptions);
+    deinitHashMap(self.gpa, &self.update_subscriptions);
+
     self.* = undefined;
 }
 
-pub fn subscribe(self: *Self) !void {
-    const template =
-        \\ {{
-        \\   "type": "subscribe",
-        \\   "channel": "{s}",
-        \\   "product_ids": ["BTC-USD"],
-        \\   "jwt": "{s}"
-        \\ }}
-    ;
+fn deinitHashMap(gpa: std.mem.Allocator, map: anytype) void {
+    var it = map.iterator();
+    while (it.next()) |e| {
+        gpa.free(e.key_ptr.*);
+        e.value_ptr.deinit(gpa);
+    }
+    map.deinit();
+}
 
-    var buf: [512]u8 = undefined;
-    const level2_message = std.fmt.bufPrint(
-        &buf,
-        template,
-        .{ "level2", self.jwt },
-    ) catch unreachable;
-    try self.ws.send(.{ .text = @constCast(level2_message) });
+const subscribe_template =
+    \\ {{
+    \\   "type": "subscribe",
+    \\   "channel": "{s}",
+    \\   "product_ids": ["{s}"],
+    \\   "jwt": "{s}"
+    \\ }}
+;
 
-    const trades_message = std.fmt.bufPrint(
-        &buf,
-        template,
-        .{ "market_trades", self.jwt },
-    ) catch unreachable;
-    try self.ws.send(.{ .text = @constCast(trades_message) });
+fn subscribe(
+    self: *Self,
+    comptime Listener: type,
+    comptime channel: []const u8,
+    ticker: []const u8,
+    subscriptions: *std.StringHashMap(std.ArrayList(Listener)),
+    listener: Listener,
+) !void {
+    if (subscriptions.getPtr(ticker)) |listeners| {
+        try listeners.append(self.gpa, listener);
+    } else {
+        var buf: [512]u8 = undefined;
+        const trades_message = std.fmt.bufPrint(
+            &buf,
+            subscribe_template,
+            .{ channel, ticker, self.jwt },
+        ) catch unreachable;
+        try self.ws.send(.{ .text = @constCast(trades_message) });
+        var listeners: std.ArrayList(Listener) = .empty;
+        try listeners.append(self.gpa, listener);
+        const ticker_owned = try self.gpa.dupe(u8, ticker);
+        try subscriptions.put(ticker_owned, listeners);
+    }
+}
 
-    // TODO: update subscribed hash map
+pub fn subscribeToTrades(
+    self: *Self,
+    ticker: []const u8,
+    listener: types.TradeListener,
+) !void {
+    try self.subscribe(
+        types.TradeListener,
+        "market_trades",
+        ticker,
+        &self.trade_subscriptions,
+        listener,
+    );
+}
+
+pub fn subscribeToUpdates(
+    self: *Self,
+    ticker: []const u8,
+    listener: types.UpdateListener,
+) !void {
+    try self.subscribe(
+        types.UpdateListener,
+        "level2",
+        ticker,
+        &self.update_subscriptions,
+        listener,
+    );
 }
 
 pub fn run(self: *Self) !void {
+    // for (0..500) |_| {
     while (true) {
         const message = try self.ws.receive();
         defer message.deinit(self.gpa);
 
         switch (message) {
-            .text => |msg| {
-                // std.debug.print("{s}\n", .{msg});
-                const Update = struct {
-                    side: []const u8,
-                    event_time: []const u8,
-                    price_level: []const u8,
-                    new_quantity: []const u8,
-                };
-                const Trade = struct {
-                    product_id: []const u8,
-                    price: []const u8,
-                    size: []const u8,
-                    time: []const u8,
-                    side: []const u8,
-                };
-                const Event = struct {
-                    type: []const u8 = "", // only here for updates?
-                    product_id: []const u8 = "",
-                    updates: []const Update = &.{},
-                    trades: []const Trade = &.{},
-                };
-                const Message = struct {
-                    channel: []const u8,
-                    events: []const Event,
-                };
-                const parsed = try std.json.parseFromSlice(
-                    Message,
-                    self.gpa,
-                    msg,
-                    .{ .ignore_unknown_fields = true },
-                );
-                defer parsed.deinit();
-                for (parsed.value.events) |event| {
-                    for (event.updates) |update| {
-                        const parsed_update: types.Update = .{
-                            .ticker = event.product_id,
-                            .ts = try .parseIso8601(update.event_time),
-                            .price = try .parse(update.price_level),
-                            .size = try .parse(update.new_quantity),
-                            .kind = .set,
-                            .side = types.Side.parse(update.side) orelse
-                                return error.InvalidSide,
-                        };
-
-                        std.debug.print("update = {}\n", .{parsed_update});
-                    }
-                    for (event.trades) |trade| {
-                        const maker_side = types.Side.parse(trade.side) orelse
-                            return error.InvalidSide;
-                        const parsed_trade: types.Trade = .{
-                            .ticker = trade.product_id,
-                            .ts = try .parseIso8601(trade.time),
-                            .price = try .parse(trade.price),
-                            .size = try .parse(trade.size),
-                            .taker_side = maker_side.opposite(),
-                        };
-
-                        std.debug.print("trade = {}\n", .{parsed_trade});
-                    }
-                }
-            },
+            .text => |msg| try self.handleMessage(msg),
             .ping => |payload| try self.ws.send(.{ .pong = payload }),
             else => return error.UnexpectedMessage,
+        }
+    }
+}
+
+fn handleMessage(self: *Self, message: []const u8) !void {
+    const Update = struct {
+        side: []const u8,
+        event_time: []const u8,
+        price_level: []const u8,
+        new_quantity: []const u8,
+    };
+    const Trade = struct {
+        product_id: []const u8,
+        price: []const u8,
+        size: []const u8,
+        time: []const u8,
+        side: []const u8,
+    };
+    const Event = struct {
+        type: []const u8 = "", // only here for updates?
+        product_id: []const u8 = "",
+        updates: []const Update = &.{},
+        trades: []const Trade = &.{},
+    };
+    const Message = struct {
+        channel: []const u8,
+        events: []const Event,
+    };
+    const parsed = try std.json.parseFromSlice(
+        Message,
+        self.gpa,
+        message,
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+    for (parsed.value.events) |event| {
+        for (event.trades) |trade| {
+            const ticker = trade.product_id;
+            if (self.trade_subscriptions.getPtr(ticker)) |listeners| {
+                const maker_side = types.Side.parse(trade.side) orelse
+                    return error.InvalidSide;
+                const parsed_trade: types.Trade = .{
+                    .ticker = ticker,
+                    .ts = try .parseIso8601(trade.time),
+                    .price = try .parse(trade.price),
+                    .size = try .parse(trade.size),
+                    .taker_side = maker_side.opposite(),
+                };
+
+                for (listeners.items) |listener| {
+                    listener.notify(listener.ptr, parsed_trade);
+                }
+            }
+        }
+
+        for (event.updates) |update| {
+            const ticker = event.product_id;
+            if (self.update_subscriptions.getPtr(ticker)) |listeners| {
+                const parsed_update: types.Update = .{
+                    .ticker = ticker,
+                    .ts = try .parseIso8601(update.event_time),
+                    .price = try .parse(update.price_level),
+                    .size = try .parse(update.new_quantity),
+                    .kind = .set,
+                    .side = types.Side.parse(update.side) orelse
+                        return error.InvalidSide,
+                };
+
+                for (listeners.items) |listener| {
+                    listener.notify(listener.ptr, parsed_update);
+                }
+            }
         }
     }
 }

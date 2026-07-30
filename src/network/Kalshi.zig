@@ -61,11 +61,14 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) !Self {
 }
 
 pub fn deinit(self: *Self) void {
+    // TODO: send close message?
     self.ws.deinit();
     self.gpa.destroy(self.ws);
+
     // var it = self.subscriptions.iterator();
     // while (it.next()) |e| e.value_ptr.deinit(self.gpa);
     // self.subscriptions.deinit(self.gpa);
+
     self.* = undefined;
 }
 
