@@ -6,6 +6,16 @@ pub const Trade = struct {
     price: Price,
     size: Size,
     taker_side: Side,
+
+    pub fn print(self: Trade, w: *std.Io.Writer) !void {
+        try w.print("{{ ticker = {s}, ts = ", .{self.ticker});
+        try self.ts.print(w);
+        try w.writeAll(", price = ");
+        try self.price.print(w);
+        try w.writeAll(", size = ");
+        try self.size.print(w);
+        try w.print(", take_side = {s} }}", .{@tagName(self.taker_side)});
+    }
 };
 
 pub const Update = struct {
@@ -17,6 +27,19 @@ pub const Update = struct {
     size: Size,
     kind: Kind,
     side: Side,
+
+    pub fn print(self: Update, w: *std.Io.Writer) !void {
+        try w.print("{{ ticker = {s}, ts = ", .{self.ticker});
+        try self.ts.print(w);
+        try w.writeAll(", price = ");
+        try self.price.print(w);
+        try w.writeAll(", size = ");
+        try self.size.print(w);
+        try w.print(
+            ", kind = {s}, side = {s} }}",
+            .{ @tagName(self.kind), @tagName(self.side) },
+        );
+    }
 };
 
 pub const Side = enum {
@@ -193,9 +216,35 @@ test "FixedPoint" {
 pub const TradeListener = struct {
     ptr: *anyopaque,
     notify: *const fn (*anyopaque, Trade) void,
+
+    pub fn printer(w: *std.Io.Writer) TradeListener {
+        return .{
+            .ptr = w,
+            .notify = printTrade,
+        };
+    }
 };
 
 pub const UpdateListener = struct {
     ptr: *anyopaque,
     notify: *const fn (*anyopaque, Update) void,
+
+    pub fn printer(w: *std.Io.Writer) UpdateListener {
+        return .{
+            .ptr = w,
+            .notify = printUpdate,
+        };
+    }
 };
+
+fn printTrade(ptr: *anyopaque, trade: Trade) void {
+    const w: *std.Io.Writer = @ptrCast(@alignCast(ptr));
+    trade.print(w) catch {};
+    w.writeAll("\n") catch {};
+}
+
+fn printUpdate(ptr: *anyopaque, update: Update) void {
+    const w: *std.Io.Writer = @ptrCast(@alignCast(ptr));
+    update.print(w) catch {};
+    w.writeAll("\n") catch {};
+}
