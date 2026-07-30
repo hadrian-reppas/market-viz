@@ -37,14 +37,13 @@ pub const Side = enum {
         };
     }
 
-    // TODO: replace with !Side
-    pub fn parse(s: []const u8) ?Side {
+    pub fn parse(s: []const u8) !Side {
         inline for (.{ Side.buy, Side.sell }) |side| {
             inline for (side.spellings()) |spelling| {
                 if (std.mem.eql(u8, s, spelling)) return side;
             }
         }
-        return null;
+        return error.InvalidSide;
     }
 };
 

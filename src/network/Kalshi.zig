@@ -167,8 +167,7 @@ fn handleMessage(self: *Self, message: []const u8) !void {
                     .ts = .fromMilliseconds(msg.ts_ms),
                     .price = try .parse(msg.yes_price_dollars),
                     .size = try .parse(msg.count_fp),
-                    .taker_side = types.Side.parse(msg.taker_outcome_side) orelse
-                        return error.InvalidSide,
+                    .taker_side = try .parse(msg.taker_outcome_side),
                 };
 
                 for (listeners.items) |listener| {
@@ -256,8 +255,7 @@ fn handleMessage(self: *Self, message: []const u8) !void {
                     .price = try .parse(msg.price_dollars),
                     .size = try .parse(size),
                     .kind = kind,
-                    .side = types.Side.parse(msg.side) orelse
-                        return error.InvalidSide,
+                    .side = try .parse(msg.side),
                 };
 
                 for (listeners.items) |listener| {

@@ -167,8 +167,7 @@ fn handleMessage(self: *Self, message: []const u8) !void {
         for (event.trades) |trade| {
             const ticker = trade.product_id;
             if (self.trade_subscriptions.get(ticker)) |listeners| {
-                const maker_side = types.Side.parse(trade.side) orelse
-                    return error.InvalidSide;
+                const maker_side: types.Side = try .parse(trade.side);
                 const parsed_trade: types.Trade = .{
                     .ticker = ticker,
                     .ts = try .parseIso8601(trade.time),
@@ -192,8 +191,7 @@ fn handleMessage(self: *Self, message: []const u8) !void {
                     .price = try .parse(update.price_level),
                     .size = try .parse(update.new_quantity),
                     .kind = .set,
-                    .side = types.Side.parse(update.side) orelse
-                        return error.InvalidSide,
+                    .side = try .parse(update.side),
                 };
 
                 for (listeners.items) |listener| {
