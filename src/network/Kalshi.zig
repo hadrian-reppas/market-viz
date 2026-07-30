@@ -2,11 +2,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const WebSocket = @import("WebSocket.zig");
 const types = @import("../market/types.zig");
+const util = @import("../util.zig");
 
 gpa: Allocator,
 ws: *WebSocket,
 msg_id: u32,
-// subscriptions: std.StringHashMap(std.ArrayList(types.TradeListener)),
+trade_subscriptions: util.Subscriptions(types.TradeListener),
+update_subscriptions: util.Subscriptions(types.UpdateListener),
 
 const Self = @This();
 
@@ -56,61 +58,79 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) !Self {
         .gpa = gpa,
         .ws = ws,
         .msg_id = 1,
-        // .subscriptions = .init(gpa),
+        .trade_subscriptions = .init(gpa),
+        .update_subscriptions = .init(gpa),
     };
 }
 
 pub fn deinit(self: *Self) void {
-    // TODO: send close message?
+    self.ws.send(.{ .close = null }) catch {};
     self.ws.deinit();
     self.gpa.destroy(self.ws);
 
-    // var it = self.subscriptions.iterator();
-    // while (it.next()) |e| e.value_ptr.deinit(self.gpa);
-    // self.subscriptions.deinit(self.gpa);
+    self.trade_subscriptions.deinit();
+    self.update_subscriptions.deinit();
 
     self.* = undefined;
 }
 
-pub fn subscribe(self: *Self, ticker: []const u8) !void {
-    const template =
-        \\ {{
-        \\   "id": {},
-        \\   "cmd": "subscribe",
-        \\   "params": {{
-        \\     "channels": ["{s}"],
-        \\     "market_tickers": ["{s}"]
-        \\   }}
-        \\ }}
-    ;
+const subscribe_template =
+    \\ {{
+    \\   "id": {},
+    \\   "cmd": "subscribe",
+    \\   "params": {{
+    \\     "channels": ["{s}"],
+    \\     "market_tickers": ["{s}"]
+    \\   }}
+    \\ }}
+;
 
+pub fn subscribeToTrades(
+    self: *Self,
+    ticker: []const u8,
+    listener: types.TradeListener,
+) !void {
     // TODO: use update_subscription with add_markets?
     // TODO: check for response?
-    var buf: [512]u8 = undefined;
-    const trade_message = std.fmt.bufPrint(
-        &buf,
-        template,
-        .{ self.msg_id, "trade", ticker },
-    ) catch unreachable;
-    self.msg_id += 1;
-    try self.ws.send(.{ .text = @constCast(trade_message) });
+    const new = try self.trade_subscriptions.insert(ticker, listener);
+    if (new) {
+        var buf: [512]u8 = undefined;
+        const message = std.fmt.bufPrint(
+            &buf,
+            subscribe_template,
+            .{ self.msg_id, "trade", ticker },
+        ) catch unreachable;
+        self.msg_id += 1;
+        try self.ws.send(.{ .text = @constCast(message) });
+    }
+}
 
-    const orderbook_message = std.fmt.bufPrint(
-        &buf,
-        template,
-        .{ self.msg_id, "orderbook_delta", ticker },
-    ) catch unreachable;
-    self.msg_id += 1;
-    try self.ws.send(.{ .text = @constCast(orderbook_message) });
-
-    // var array: std.ArrayList(Listener) = .empty;
-    // try array.append(self.gpa, listener);
-    // try self.subscriptions.put(self.gpa, ticker, array);
+pub fn subscribeToUpdates(
+    self: *Self,
+    ticker: []const u8,
+    listener: types.UpdateListener,
+) !void {
+    // TODO: use update_subscription with add_markets?
+    // TODO: check for response?
+    const new = try self.update_subscriptions.insert(ticker, listener);
+    if (new) {
+        var buf: [512]u8 = undefined;
+        const message = std.fmt.bufPrint(
+            &buf,
+            subscribe_template,
+            .{ self.msg_id, "orderbook_delta", ticker },
+        ) catch unreachable;
+        self.msg_id += 1;
+        try self.ws.send(.{ .text = @constCast(message) });
+    }
 }
 
 pub fn run(self: *Self) !void {
     while (true) {
-        const message = try self.ws.receive();
+        const message = self.ws.receive() catch |err| {
+            if (self.ws.wasCanceled()) return error.Canceled;
+            return err;
+        };
         defer message.deinit(self.gpa);
 
         switch (message) {
@@ -138,17 +158,23 @@ fn handleMessage(self: *Self, message: []const u8) !void {
                 .{ .ignore_unknown_fields = true },
             );
             defer parsed.deinit();
-            const msg = parsed.value.msg;
-            const parsed_trade: types.Trade = .{
-                .ticker = msg.market_ticker,
-                .ts = .fromMilliseconds(msg.ts_ms),
-                .price = try .parse(msg.yes_price_dollars),
-                .size = try .parse(msg.count_fp),
-                .taker_side = types.Side.parse(msg.taker_outcome_side) orelse
-                    return error.InvalidSide,
-            };
 
-            std.debug.print("trade = {}\n", .{parsed_trade});
+            const msg = parsed.value.msg;
+            const ticker = msg.market_ticker;
+            if (self.trade_subscriptions.get(ticker)) |listeners| {
+                const parsed_trade: types.Trade = .{
+                    .ticker = ticker,
+                    .ts = .fromMilliseconds(msg.ts_ms),
+                    .price = try .parse(msg.yes_price_dollars),
+                    .size = try .parse(msg.count_fp),
+                    .taker_side = types.Side.parse(msg.taker_outcome_side) orelse
+                        return error.InvalidSide,
+                };
+
+                for (listeners.items) |listener| {
+                    listener.notify(listener.ptr, parsed_trade);
+                }
+            }
         },
         .orderbook_snapshot => {
             const Snapshot = struct {
@@ -163,28 +189,38 @@ fn handleMessage(self: *Self, message: []const u8) !void {
                 .{ .ignore_unknown_fields = true },
             );
             defer parsed.deinit();
+
             const msg = parsed.value.msg;
-            for (msg.no_dollars_fp) |entry| {
-                const parsed_update: types.Update = .{
-                    .ticker = msg.market_ticker,
-                    .ts = .zero,
-                    .price = try .parse(entry.@"0"),
-                    .size = try .parse(entry.@"1"),
-                    .kind = .set,
-                    .side = .sell,
-                };
-                std.debug.print("update = {}\n", .{parsed_update});
-            }
-            for (msg.yes_dollars_fp) |entry| {
-                const parsed_update: types.Update = .{
-                    .ticker = msg.market_ticker,
-                    .ts = .zero,
-                    .price = try .parse(entry.@"0"),
-                    .size = try .parse(entry.@"1"),
-                    .kind = .set,
-                    .side = .buy,
-                };
-                std.debug.print("update = {}\n", .{parsed_update});
+            const ticker = msg.market_ticker;
+            if (self.update_subscriptions.get(ticker)) |listeners| {
+                for (msg.no_dollars_fp) |entry| {
+                    const parsed_update: types.Update = .{
+                        .ticker = msg.market_ticker,
+                        .ts = .zero,
+                        .price = try .parse(entry.@"0"),
+                        .size = try .parse(entry.@"1"),
+                        .kind = .set,
+                        .side = .sell,
+                    };
+
+                    for (listeners.items) |listener| {
+                        listener.notify(listener.ptr, parsed_update);
+                    }
+                }
+                for (msg.yes_dollars_fp) |entry| {
+                    const parsed_update: types.Update = .{
+                        .ticker = msg.market_ticker,
+                        .ts = .zero,
+                        .price = try .parse(entry.@"0"),
+                        .size = try .parse(entry.@"1"),
+                        .kind = .set,
+                        .side = .buy,
+                    };
+
+                    for (listeners.items) |listener| {
+                        listener.notify(listener.ptr, parsed_update);
+                    }
+                }
             }
         },
         .orderbook_delta => {
@@ -202,27 +238,34 @@ fn handleMessage(self: *Self, message: []const u8) !void {
                 .{ .ignore_unknown_fields = true },
             );
             defer parsed.deinit();
+
             const msg = parsed.value.msg;
+            const ticker = msg.market_ticker;
 
-            var size = msg.delta_fp;
-            var kind = types.Update.Kind.add;
-            if (size[0] == '-') {
-                size = size[1..];
-                kind = .sub;
+            if (self.update_subscriptions.get(ticker)) |listeners| {
+                var size = msg.delta_fp;
+                var kind = types.Update.Kind.add;
+                if (size[0] == '-') {
+                    size = size[1..];
+                    kind = .sub;
+                }
+
+                const parsed_update: types.Update = .{
+                    .ticker = msg.market_ticker,
+                    .ts = .fromMilliseconds(msg.ts_ms),
+                    .price = try .parse(msg.price_dollars),
+                    .size = try .parse(size),
+                    .kind = kind,
+                    .side = types.Side.parse(msg.side) orelse
+                        return error.InvalidSide,
+                };
+
+                for (listeners.items) |listener| {
+                    listener.notify(listener.ptr, parsed_update);
+                }
             }
-
-            const parsed_update: types.Update = .{
-                .ticker = msg.market_ticker,
-                .ts = .fromMilliseconds(msg.ts_ms),
-                .price = try .parse(msg.price_dollars),
-                .size = try .parse(size),
-                .kind = kind,
-                .side = types.Side.parse(msg.side) orelse
-                    return error.InvalidSide,
-            };
-            std.debug.print("update = {}\n", .{parsed_update});
         },
-        .subscribed => {},
+        .subscribed, .ok => {},
     }
 }
 
@@ -241,6 +284,7 @@ fn getMessageType(gpa: Allocator, json: []const u8) !MessageType {
 
 const MessageType = enum {
     subscribed,
+    ok,
     trade,
     orderbook_snapshot,
     orderbook_delta,

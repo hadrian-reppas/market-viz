@@ -37,6 +37,7 @@ pub const Side = enum {
         };
     }
 
+    // TODO: replace with !Side
     pub fn parse(s: []const u8) ?Side {
         inline for (.{ Side.buy, Side.sell }) |side| {
             inline for (side.spellings()) |spelling| {

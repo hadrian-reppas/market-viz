@@ -19,8 +19,25 @@ fn printUpdate(_: *anyopaque, update: types.Update) void {
     std.debug.print("update ({s}) = {}\n", .{ update.ticker, update });
 }
 
+fn runCoinbase(coinbase: *Coinbase) std.Io.Cancelable!void {
+    coinbase.run() catch |err| switch (err) {
+        error.Canceled => |e| return e,
+        else => std.debug.print("Coinbase error: {}\n", .{err}),
+    };
+}
+
+fn runKalshi(kalshi: *Kalshi) std.Io.Cancelable!void {
+    kalshi.run() catch |err| switch (err) {
+        error.Canceled => |e| return e,
+        else => std.debug.print("Kalshi error: {}\n", .{err}),
+    };
+}
+
 pub fn main(init: std.process.Init) !void {
-    var coinbase = try Coinbase.init(init.gpa, init.io, .{
+    const gpa = init.gpa;
+    const io = init.io;
+
+    var coinbase = try Coinbase.init(gpa, io, .{
         .key_id = secrets.coinbase.key_id,
         .private_key_base64 = secrets.coinbase.private_key_base64,
     });
@@ -31,20 +48,26 @@ pub fn main(init: std.process.Init) !void {
     try coinbase.subscribeToUpdates("ETH-USD", update_printer);
     try coinbase.subscribeToUpdates("BTC-USD", update_printer);
 
-    try coinbase.run();
+    var kalshi: Kalshi = try .init(gpa, io, .{
+        .key_id = secrets.kalshi.key_id,
+        .private_key_pem = secrets.kalshi.private_key_pem,
+    });
+    defer kalshi.deinit();
+
+    try kalshi.subscribeToTrades("KXBTC15M-26JUL301715-15", trade_printer);
+    try kalshi.subscribeToUpdates("KXBTC15M-26JUL301715-15", update_printer);
+
+    var listeners: std.Io.Group = .init;
+    defer listeners.cancel(io);
+
+    try listeners.concurrent(io, runCoinbase, .{&coinbase});
+    try listeners.concurrent(io, runKalshi, .{&kalshi});
+
+    try io.sleep(.fromSeconds(60), .real);
+    listeners.cancel(io);
 
     // var collator = try Collator.init(init.gpa, 64, .@"5s");
     // defer collator.deinit(init.gpa);
-
-    // var kalshi = try Kalshi.init(init.gpa, init.io, .{
-    //     .key_id = secrets.kalshi.key_id,
-    //     .private_key_pem = secrets.kalshi.private_key_pem,
-    // });
-    // defer kalshi.deinit();
-    // try kalshi.subscribe("KXATPMATCH-26JUL30NAKMEN-NAK");
-    // try kalshi.run();
-
-    // if (collator.buckets.len == 64) return;
 
     // const thread = try std.Thread.spawn(.{}, netMain, .{ init.gpa, init.io, &collator });
 

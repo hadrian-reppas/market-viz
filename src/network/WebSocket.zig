@@ -248,6 +248,11 @@ pub const Message = union(enum) {
     }
 };
 
+pub fn wasCanceled(self: *const Self) bool {
+    const err = self.tcp_reader.err orelse return false;
+    return err == error.Canceled;
+}
+
 pub fn receive(self: *Self) !Message {
     const header = try self.receiveHeader(.start);
     const length = try header.getLength(&self.client.reader);
