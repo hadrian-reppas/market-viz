@@ -1,12 +1,23 @@
 const std = @import("std");
 const Kalshi = @import("network/Kalshi.zig");
+const Coinbase = @import("network/Coinbase.zig");
 const secrets = @import("secrets.zig");
-const types = @import("network/types.zig"); // TODO: move to Market
 const Collator = @import("market/Collator.zig");
 const Window = @import("gui/Window.zig");
 
 pub fn main(init: std.process.Init) !void {
+    var coinbase = try Coinbase.init(init.gpa, init.io, .{
+        .key_id = secrets.coinbase.key_id,
+        .private_key_base64 = secrets.coinbase.private_key_base64,
+    });
+
+    try coinbase.subscribe();
+    try coinbase.run();
+
     var collator = try Collator.init(init.gpa, 64, .@"5s");
+    defer collator.deinit(init.gpa);
+
+    if (collator.buckets.len == 64) return;
 
     const thread = try std.Thread.spawn(.{}, netMain, .{ init.gpa, init.io, &collator });
 
@@ -33,8 +44,8 @@ fn netMain(gpa: std.mem.Allocator, io: std.Io, collator: *Collator) !void {
     // try bundle.addCertsFromFilePath(gpa, io, now, std.Io.Dir.cwd(), "rootCA.pem");
 
     var kalshi = try Kalshi.init(gpa, io, .{
-        .key_id = secrets.key_id,
-        .private_key_pem = secrets.private_key_pem,
+        .key_id = secrets.kalshi.key_id,
+        .private_key_pem = secrets.kalshi.private_key_pem,
         // .host = "localhost",
         // .port = 8443,
         // .path = "/",
@@ -42,10 +53,12 @@ fn netMain(gpa: std.mem.Allocator, io: std.Io, collator: *Collator) !void {
     });
     defer kalshi.deinit();
 
-    const ticker = try types.Ticker.init("KXBTCD-26JUL2910-T64399.99");
-    try kalshi.subscribe(ticker, collator.listener());
+    _ = collator;
 
-    try kalshi.run();
+    // const ticker = try types.Ticker.init("KXBTCD-26JUL2910-T64399.99");
+    // try kalshi.subscribe(ticker, collator.listener());
+
+    // try kalshi.run();
 }
 
 const Margin = struct {
@@ -205,5 +218,6 @@ fn draw(userdata: *anyopaque, canvas: Window.Canvas) void {
 }
 
 test {
-    _ = types;
+    _ = @import("market/types.zig");
+    _ = @import("market/iso8601.zig");
 }

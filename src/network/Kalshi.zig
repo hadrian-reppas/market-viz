@@ -5,7 +5,8 @@ const types = @import("types.zig");
 
 gpa: Allocator,
 ws: *WebSocket,
-subscriptions: types.TickerHashMap(std.ArrayList(Listener)),
+msg_id: u32,
+subscriptions: types.TickerHashMap(std.ArrayList(Listener)), // std.StringHashMap(std.ArrayList(Listener)),
 
 const Self = @This();
 
@@ -59,6 +60,7 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) !Self {
     return .{
         .gpa = gpa,
         .ws = ws,
+        .msg_id = 1,
         .subscriptions = .empty,
     };
 }
@@ -75,7 +77,7 @@ pub fn deinit(self: *Self) void {
 pub fn subscribe(self: *Self, ticker: types.Ticker, listener: Listener) !void {
     const template =
         \\ {{
-        \\   "id": 1,
+        \\   "id": {},
         \\   "cmd": "subscribe",
         \\   "params": {{
         \\     "channels": ["trade"],
@@ -86,9 +88,15 @@ pub fn subscribe(self: *Self, ticker: types.Ticker, listener: Listener) !void {
     if (self.subscriptions.getPtr(ticker)) |a| {
         try a.append(self.gpa, listener);
     } else {
-        // TODO: check response?
+        // TODO: use update_subscription with add_markets?
+        // TODO: check for response?
         var buf: [template.len + types.Ticker.max_len]u8 = undefined;
-        const message = std.fmt.bufPrint(&buf, template, .{ticker.str()}) catch unreachable;
+        const message = std.fmt.bufPrint(
+            &buf,
+            template,
+            .{ self.msg_id, ticker.str() },
+        ) catch unreachable;
+        self.msg_id += 1;
         try self.ws.send(.{ .text = @constCast(message) });
         var array: std.ArrayList(Listener) = .empty;
         try array.append(self.gpa, listener);
@@ -104,7 +112,7 @@ pub fn run(self: *Self) !void {
         switch (message) {
             .text => |msg| try self.handleMessage(msg),
             .ping => |payload| try self.ws.send(.{ .pong = payload }),
-            else => {}, // TODO
+            else => return error.UnexpectedMessage,
         }
     }
 }
@@ -153,7 +161,7 @@ fn signMessage(private_key_pem: []const u8, message: []const u8) ![256]u8 {
     const bio = c.BIO_new_mem_buf(
         private_key_pem.ptr,
         @intCast(private_key_pem.len),
-    ) orelse return error.OpenSslFailure;
+    ) orelse return error.OpenSslError;
     defer _ = c.BIO_free(bio);
 
     const key = c.PEM_read_bio_PrivateKey(bio, null, null, null) orelse
@@ -161,20 +169,20 @@ fn signMessage(private_key_pem: []const u8, message: []const u8) ![256]u8 {
     defer c.EVP_PKEY_free(key);
 
     const md_ctx = c.EVP_MD_CTX_new() orelse
-        return error.OpenSslFailure;
+        return error.OpenSslError;
     defer c.EVP_MD_CTX_free(md_ctx);
 
     var rsa_ctx_opt: ?*c.EVP_PKEY_CTX = null;
     if (c.EVP_DigestSignInit(md_ctx, &rsa_ctx_opt, c.EVP_sha256(), null, key) <= 0)
-        return error.OpenSslFailure;
-    const rsa_ctx = rsa_ctx_opt orelse return error.OpenSslFailure;
+        return error.OpenSslError;
+    const rsa_ctx = rsa_ctx_opt orelse return error.OpenSslError;
 
     if (c.EVP_PKEY_CTX_set_rsa_padding(rsa_ctx, c.RSA_PKCS1_PSS_PADDING) <= 0)
-        return error.OpenSslFailure;
+        return error.OpenSslError;
     if (c.EVP_PKEY_CTX_set_rsa_pss_saltlen(rsa_ctx, c.RSA_PSS_SALTLEN_DIGEST) <= 0)
-        return error.OpenSslFailure;
+        return error.OpenSslError;
     if (c.EVP_PKEY_CTX_set_rsa_mgf1_md(rsa_ctx, c.EVP_sha256()) <= 0)
-        return error.OpenSslFailure;
+        return error.OpenSslError;
 
     var signature: [256]u8 = undefined;
     var signature_len: usize = signature.len;
@@ -185,8 +193,8 @@ fn signMessage(private_key_pem: []const u8, message: []const u8) ![256]u8 {
         message.ptr,
         message.len,
     ) <= 0)
-        return error.OpenSslFailure;
-    if (signature_len != signature.len) return error.OpenSslFailure;
+        return error.OpenSslError;
+    if (signature_len != signature.len) return error.OpenSslError;
 
     return signature;
 }
