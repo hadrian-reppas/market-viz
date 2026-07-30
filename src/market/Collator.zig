@@ -1,6 +1,5 @@
 const std = @import("std");
-const t = @import("../network/types.zig");
-const Listener = @import("../network/Kalshi.zig").Listener;
+const types = @import("types.zig");
 
 mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
 buckets: []Bucket,
@@ -11,7 +10,7 @@ const Self = @This();
 
 pub fn init(gpa: std.mem.Allocator, n: usize, resolution: Resolution) !Self {
     const buckets = try gpa.alloc(Bucket, n);
-    @memset(buckets, .init(0));
+    @memset(buckets, .init(.zero));
     return .{ .buckets = buckets, .resolution = resolution, .head = 0 };
 }
 
@@ -21,7 +20,7 @@ pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
     self.* = undefined;
 }
 
-fn indexOf(self: *Self, ts: t.Ts) usize {
+fn indexOf(self: *Self, ts: types.Ts) usize {
     return ts / self.resolution.toMilliseconds();
 }
 
@@ -37,13 +36,13 @@ pub fn unlock(self: *Self) void {
     _ = std.c.pthread_mutex_unlock(&self.mutex);
 }
 
-pub fn insert(self: *Self, ts: t.Ts, price: t.Price, size: t.Size) void {
+pub fn insert(self: *Self, ts: types.Ts, price: types.Price, size: types.Size) void {
     self.touch(ts);
     const index = self.indexOf(ts);
     self.get(index).insert(price, size);
 }
 
-pub fn touch(self: *Self, ts: t.Ts) void {
+pub fn touch(self: *Self, ts: types.Ts) void {
     const new_head = self.indexOf(ts);
     for (0..self.buckets.len) |i| {
         const expected = (new_head - i) * self.resolution.toMilliseconds();
@@ -62,13 +61,13 @@ pub fn copy(self: *Self, buckets: []Bucket) void {
     const self_start = self.head - n + 1;
     const buckets_start = self.buckets.len - n;
     for (0..buckets_start) |i| {
-        buckets[i] = .init(0);
+        buckets[i] = .init(.zero);
     }
     for (0..n) |i| {
         buckets[buckets_start + i] = self.get(self_start + i).*;
     }
     for (n..buckets.len) |i| {
-        buckets[i] = .init(0);
+        buckets[i] = .init(.zero);
     }
 }
 
@@ -79,11 +78,11 @@ pub fn realloc(self: *Self, gpa: std.mem.Allocator, n: usize) !void {
     @panic("todo");
 }
 
-pub fn listener(self: *Self) Listener {
+pub fn listener(self: *Self) types.TradeListener {
     return .{ .ptr = self, .notify = insertTrade };
 }
 
-fn insertTrade(ptr: *anyopaque, trade: t.Trade) void {
+fn insertTrade(ptr: *anyopaque, trade: types.Trade) void {
     const collator: *Self = @ptrCast(@alignCast(ptr));
 
     collator.lock();
@@ -112,7 +111,7 @@ pub const Resolution = enum {
     @"30m",
     @"1h",
 
-    pub fn toMilliseconds(self: Resolution) t.Ts {
+    pub fn toMilliseconds(self: Resolution) types.Ts {
         return switch (self) {
             .@"1s" => 1000,
             .@"5s" => 5 * 1000,
@@ -128,15 +127,15 @@ pub const Resolution = enum {
 };
 
 pub const Bucket = struct {
-    start: t.Ts,
-    open: t.Price,
-    close: t.Price,
-    low: t.Price,
-    high: t.Price,
-    volume: t.Size,
-    notional: t.Notional,
+    start: types.Ts,
+    open: types.Price,
+    close: types.Price,
+    low: types.Price,
+    high: types.Price,
+    volume: types.Size,
+    notional: types.Notional,
 
-    pub fn init(start: t.Ts) Bucket {
+    pub fn init(start: types.Ts) Bucket {
         return .{
             .start = start,
             .open = .zero,
@@ -148,7 +147,7 @@ pub const Bucket = struct {
         };
     }
 
-    pub fn insert(self: *Bucket, price: t.Price, size: t.Size) void {
+    pub fn insert(self: *Bucket, price: types.Price, size: types.Size) void {
         if (self.isEmpty()) self.open = price;
         self.close = price;
         self.low = self.low.min(price);

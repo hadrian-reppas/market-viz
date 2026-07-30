@@ -6,35 +6,44 @@ const Collator = @import("market/Collator.zig");
 const Window = @import("gui/Window.zig");
 
 pub fn main(init: std.process.Init) !void {
-    var coinbase = try Coinbase.init(init.gpa, init.io, .{
-        .key_id = secrets.coinbase.key_id,
-        .private_key_base64 = secrets.coinbase.private_key_base64,
+    // var coinbase = try Coinbase.init(init.gpa, init.io, .{
+    //     .key_id = secrets.coinbase.key_id,
+    //     .private_key_base64 = secrets.coinbase.private_key_base64,
+    // });
+
+    // try coinbase.subscribe();
+    // try coinbase.run();
+
+    var kalshi = try Kalshi.init(init.gpa, init.io, .{
+        .key_id = secrets.kalshi.key_id,
+        .private_key_pem = secrets.kalshi.private_key_pem,
     });
+    defer kalshi.deinit();
 
-    try coinbase.subscribe();
-    try coinbase.run();
+    // var collator = try Collator.init(init.gpa, 64, .@"5s");
+    // defer collator.deinit(init.gpa);
+    try kalshi.subscribe("KXATPMATCH-26JUL30NAKMEN-NAK");
 
-    var collator = try Collator.init(init.gpa, 64, .@"5s");
-    defer collator.deinit(init.gpa);
+    try kalshi.run();
 
-    if (collator.buckets.len == 64) return;
+    // if (collator.buckets.len == 64) return;
 
-    const thread = try std.Thread.spawn(.{}, netMain, .{ init.gpa, init.io, &collator });
+    // const thread = try std.Thread.spawn(.{}, netMain, .{ init.gpa, init.io, &collator });
 
-    var window = try Window.init(.{
-        .userdata = @ptrCast(&collator),
-        .draw = draw,
-        .mode = .{ .windowed = .{ .width = 1280, .height = 720 } },
-        .high_pixel_density = true,
-        .borderless = true,
-    });
-    defer window.deinit();
+    // var window = try Window.init(.{
+    //     .userdata = @ptrCast(&collator),
+    //     .draw = draw,
+    //     .mode = .{ .windowed = .{ .width = 1280, .height = 720 } },
+    //     .high_pixel_density = true,
+    //     .borderless = true,
+    // });
+    // defer window.deinit();
 
-    try window.run();
+    // try window.run();
 
-    // thread.join();
-    thread.detach();
-    std.process.exit(0);
+    // // thread.join();
+    // thread.detach();
+    // std.process.exit(0);
 }
 
 fn netMain(gpa: std.mem.Allocator, io: std.Io, collator: *Collator) !void {

@@ -54,15 +54,26 @@ pub fn subscribe(self: *Self) !void {
     const template =
         \\ {{
         \\   "type": "subscribe",
-        \\   "channel": "level2",
+        \\   "channel": "{s}",
         \\   "product_ids": ["BTC-USD"],
         \\   "jwt": "{s}"
         \\ }}
     ;
 
     var buf: [512]u8 = undefined;
-    const message = std.fmt.bufPrint(&buf, template, .{self.jwt}) catch unreachable;
-    try self.ws.send(.{ .text = @constCast(message) });
+    const level2_message = std.fmt.bufPrint(
+        &buf,
+        template,
+        .{ "level2", self.jwt },
+    ) catch unreachable;
+    try self.ws.send(.{ .text = @constCast(level2_message) });
+
+    const trades_message = std.fmt.bufPrint(
+        &buf,
+        template,
+        .{ "market_trades", self.jwt },
+    ) catch unreachable;
+    try self.ws.send(.{ .text = @constCast(trades_message) });
 
     // TODO: update subscribed hash map
 }
@@ -74,20 +85,29 @@ pub fn run(self: *Self) !void {
 
         switch (message) {
             .text => |msg| {
+                // std.debug.print("{s}\n", .{msg});
                 const Update = struct {
                     side: []const u8,
                     event_time: []const u8,
                     price_level: []const u8,
                     new_quantity: []const u8,
                 };
+                const Trade = struct {
+                    product_id: []const u8,
+                    price: []const u8,
+                    size: []const u8,
+                    time: []const u8,
+                    side: []const u8,
+                };
+                const Event = struct {
+                    type: []const u8 = "", // only here for updates?
+                    product_id: []const u8 = "",
+                    updates: []const Update = &.{},
+                    trades: []const Trade = &.{},
+                };
                 const Message = struct {
                     channel: []const u8,
-                    timestamp: []const u8,
-                    events: []const struct {
-                        type: []const u8 = "",
-                        product_id: []const u8 = "",
-                        updates: []const Update = &.{},
-                    },
+                    events: []const Event,
                 };
                 const parsed = try std.json.parseFromSlice(
                     Message,
@@ -108,7 +128,20 @@ pub fn run(self: *Self) !void {
                                 return error.InvalidSide,
                         };
 
-                        std.debug.print("{}\n", .{parsed_update});
+                        std.debug.print("update = {}\n", .{parsed_update});
+                    }
+                    for (event.trades) |trade| {
+                        const maker_side = types.Side.parse(trade.side) orelse
+                            return error.InvalidSide;
+                        const parsed_trade: types.Trade = .{
+                            .ticker = trade.product_id,
+                            .ts = try .parseIso8601(trade.time),
+                            .price = try .parse(trade.price),
+                            .size = try .parse(trade.size),
+                            .taker_side = maker_side.opposite(),
+                        };
+
+                        std.debug.print("trade = {}\n", .{parsed_trade});
                     }
                 }
             },

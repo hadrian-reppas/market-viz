@@ -23,10 +23,17 @@ pub const Side = enum {
     buy,
     sell,
 
-    pub fn spellings(self: Side) [3][]const u8 {
+    pub fn spellings(self: Side) [4][]const u8 {
         return switch (self) {
-            .buy => .{ "buy", "yes", "bid" },
-            .sell => .{ "sell", "no", "offer" },
+            .buy => .{ "buy", "yes", "bid", "BUY" },
+            .sell => .{ "sell", "no", "offer", "SELL" },
+        };
+    }
+
+    pub fn opposite(self: Side) Side {
+        return switch (self) {
+            .buy => .sell,
+            .sell => .buy,
         };
     }
 
@@ -43,6 +50,7 @@ pub const Side = enum {
 pub const Ts = struct {
     const iso8601 = @import("iso8601.zig");
     pub const buf_len = iso8601.buf_len;
+    pub const zero: Ts = .{ .microseconds = 0 };
 
     microseconds: u64,
 
@@ -53,7 +61,7 @@ pub const Ts = struct {
     }
 
     pub fn fromMilliseconds(millis: u64) Ts {
-        return .{ .microseconds = millis };
+        return .{ .microseconds = 1_000 * millis };
     }
 
     pub fn fmtIso8601(self: Ts, buf: *[buf_len]u8) void {
