@@ -54,8 +54,8 @@ pub fn main(init: std.process.Init) !void {
     });
     defer kalshi.deinit();
 
-    try kalshi.subscribeToTrades("KXBTC15M-26JUL301715-15", trade_printer);
-    try kalshi.subscribeToUpdates("KXBTC15M-26JUL301715-15", update_printer);
+    try kalshi.subscribeToTrades("KXBTC15M-26JUL301800-00", trade_printer);
+    try kalshi.subscribeToUpdates("KXBTC15M-26JUL301800-00", update_printer);
 
     var listeners: std.Io.Group = .init;
     defer listeners.cancel(io);

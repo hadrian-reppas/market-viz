@@ -143,129 +143,22 @@ pub fn run(self: *Self) !void {
 
 fn handleMessage(self: *Self, message: []const u8) !void {
     switch (try getMessageType(self.gpa, message)) {
-        .trade => {
-            const Trade = struct {
-                market_ticker: []const u8,
-                yes_price_dollars: []const u8,
-                count_fp: []const u8,
-                taker_outcome_side: []const u8,
-                ts_ms: u64,
-            };
-            const parsed = try std.json.parseFromSlice(
-                struct { msg: Trade },
-                self.gpa,
-                message,
-                .{ .ignore_unknown_fields = true },
-            );
-            defer parsed.deinit();
-
-            const msg = parsed.value.msg;
-            const ticker = msg.market_ticker;
-            if (self.trade_subscriptions.get(ticker)) |listeners| {
-                const parsed_trade: types.Trade = .{
-                    .ticker = ticker,
-                    .ts = .fromMilliseconds(msg.ts_ms),
-                    .price = try .parse(msg.yes_price_dollars),
-                    .size = try .parse(msg.count_fp),
-                    .taker_side = try .parse(msg.taker_outcome_side),
-                };
-
-                for (listeners.items) |listener| {
-                    listener.notify(listener.ptr, parsed_trade);
-                }
-            }
-        },
-        .orderbook_snapshot => {
-            const Snapshot = struct {
-                market_ticker: []const u8,
-                no_dollars_fp: []const struct { []const u8, []const u8 },
-                yes_dollars_fp: []const struct { []const u8, []const u8 },
-            };
-            const parsed = try std.json.parseFromSlice(
-                struct { msg: Snapshot },
-                self.gpa,
-                message,
-                .{ .ignore_unknown_fields = true },
-            );
-            defer parsed.deinit();
-
-            const msg = parsed.value.msg;
-            const ticker = msg.market_ticker;
-            if (self.update_subscriptions.get(ticker)) |listeners| {
-                for (msg.no_dollars_fp) |entry| {
-                    const parsed_update: types.Update = .{
-                        .ticker = msg.market_ticker,
-                        .ts = .zero,
-                        .price = try .parse(entry.@"0"),
-                        .size = try .parse(entry.@"1"),
-                        .kind = .set,
-                        .side = .sell,
-                    };
-
-                    for (listeners.items) |listener| {
-                        listener.notify(listener.ptr, parsed_update);
-                    }
-                }
-                for (msg.yes_dollars_fp) |entry| {
-                    const parsed_update: types.Update = .{
-                        .ticker = msg.market_ticker,
-                        .ts = .zero,
-                        .price = try .parse(entry.@"0"),
-                        .size = try .parse(entry.@"1"),
-                        .kind = .set,
-                        .side = .buy,
-                    };
-
-                    for (listeners.items) |listener| {
-                        listener.notify(listener.ptr, parsed_update);
-                    }
-                }
-            }
-        },
-        .orderbook_delta => {
-            const Update = struct {
-                delta_fp: []const u8,
-                market_ticker: []const u8,
-                price_dollars: []const u8,
-                side: []const u8,
-                ts_ms: u64,
-            };
-            const parsed = try std.json.parseFromSlice(
-                struct { msg: Update },
-                self.gpa,
-                message,
-                .{ .ignore_unknown_fields = true },
-            );
-            defer parsed.deinit();
-
-            const msg = parsed.value.msg;
-            const ticker = msg.market_ticker;
-
-            if (self.update_subscriptions.get(ticker)) |listeners| {
-                var size = msg.delta_fp;
-                var kind = types.Update.Kind.add;
-                if (size[0] == '-') {
-                    size = size[1..];
-                    kind = .sub;
-                }
-
-                const parsed_update: types.Update = .{
-                    .ticker = msg.market_ticker,
-                    .ts = .fromMilliseconds(msg.ts_ms),
-                    .price = try .parse(msg.price_dollars),
-                    .size = try .parse(size),
-                    .kind = kind,
-                    .side = try .parse(msg.side),
-                };
-
-                for (listeners.items) |listener| {
-                    listener.notify(listener.ptr, parsed_update);
-                }
-            }
-        },
+        .trade => try self.handleTradeMessage(message),
+        .orderbook_snapshot => try self.handleSnapshotMessage(message),
+        .orderbook_delta => try self.handleDeltaMessage(message),
         .subscribed, .ok => {},
+        .unknown => {},
     }
 }
+
+const MessageType = enum {
+    subscribed,
+    ok,
+    trade,
+    orderbook_snapshot,
+    orderbook_delta,
+    unknown,
+};
 
 fn getMessageType(gpa: Allocator, json: []const u8) !MessageType {
     const parsed = try std.json.parseFromSlice(
@@ -276,17 +169,131 @@ fn getMessageType(gpa: Allocator, json: []const u8) !MessageType {
     );
     defer parsed.deinit();
 
-    return std.meta.stringToEnum(MessageType, parsed.value.type) orelse
-        error.UnexpectedKalshiMessageType;
+    return std.meta.stringToEnum(MessageType, parsed.value.type) orelse .unknown;
 }
 
-const MessageType = enum {
-    subscribed,
-    ok,
-    trade,
-    orderbook_snapshot,
-    orderbook_delta,
-};
+fn handleTradeMessage(self: *Self, message: []const u8) !void {
+    const Trade = struct {
+        market_ticker: []const u8,
+        yes_price_dollars: []const u8,
+        count_fp: []const u8,
+        taker_outcome_side: []const u8,
+        ts_ms: u64,
+    };
+    const parsed = try std.json.parseFromSlice(
+        struct { msg: Trade },
+        self.gpa,
+        message,
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+
+    const msg = parsed.value.msg;
+    const ticker = msg.market_ticker;
+    if (self.trade_subscriptions.get(ticker)) |listeners| {
+        const parsed_trade: types.Trade = .{
+            .ticker = ticker,
+            .ts = .fromMilliseconds(msg.ts_ms),
+            .price = try .parse(msg.yes_price_dollars),
+            .size = try .parse(msg.count_fp),
+            .taker_side = try .parse(msg.taker_outcome_side),
+        };
+
+        for (listeners.items) |listener| {
+            listener.notify(listener.ptr, parsed_trade);
+        }
+    }
+}
+
+fn handleSnapshotMessage(self: *Self, message: []const u8) !void {
+    const Snapshot = struct {
+        market_ticker: []const u8,
+        no_dollars_fp: []const struct { []const u8, []const u8 },
+        yes_dollars_fp: []const struct { []const u8, []const u8 },
+    };
+    const parsed = try std.json.parseFromSlice(
+        struct { msg: Snapshot },
+        self.gpa,
+        message,
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+
+    const msg = parsed.value.msg;
+    const ticker = msg.market_ticker;
+    if (self.update_subscriptions.get(ticker)) |listeners| {
+        for (msg.no_dollars_fp) |entry| {
+            const update: types.Update = .{
+                .ticker = msg.market_ticker,
+                .ts = .zero,
+                .price = try .parse(entry.@"0"),
+                .size = try .parse(entry.@"1"),
+                .kind = .set,
+                .side = .sell,
+            };
+
+            for (listeners.items) |listener| {
+                listener.notify(listener.ptr, update);
+            }
+        }
+        for (msg.yes_dollars_fp) |entry| {
+            const update: types.Update = .{
+                .ticker = msg.market_ticker,
+                .ts = .zero,
+                .price = try .parse(entry.@"0"),
+                .size = try .parse(entry.@"1"),
+                .kind = .set,
+                .side = .buy,
+            };
+
+            for (listeners.items) |listener| {
+                listener.notify(listener.ptr, update);
+            }
+        }
+    }
+}
+
+fn handleDeltaMessage(self: *Self, message: []const u8) !void {
+    const Update = struct {
+        delta_fp: []const u8,
+        market_ticker: []const u8,
+        price_dollars: []const u8,
+        side: []const u8,
+        ts_ms: u64,
+    };
+    const parsed = try std.json.parseFromSlice(
+        struct { msg: Update },
+        self.gpa,
+        message,
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+
+    const msg = parsed.value.msg;
+    const ticker = msg.market_ticker;
+
+    if (self.update_subscriptions.get(ticker)) |listeners| {
+        var size = msg.delta_fp;
+        var kind = types.Update.Kind.add;
+        if (size[0] == '-') {
+            size = size[1..];
+            kind = .sub;
+        }
+
+        const update: types.Update = .{
+            .ticker = msg.market_ticker,
+            .ts = .fromMilliseconds(msg.ts_ms),
+            .price = try .parse(msg.price_dollars),
+            .size = try .parse(size),
+            .kind = kind,
+            .side = try .parse(msg.side),
+        };
+
+        for (listeners.items) |listener| {
+            listener.notify(listener.ptr, update);
+        }
+    }
+}
 
 fn signMessage(private_key_pem: []const u8, message: []const u8) ![256]u8 {
     const c = @cImport({

@@ -132,13 +132,14 @@ pub fn run(self: *Self) !void {
     }
 }
 
-fn handleMessage(self: *Self, message: []const u8) !void {
+const CoinbaseMessage = struct {
     const Update = struct {
         side: []const u8,
         event_time: []const u8,
         price_level: []const u8,
         new_quantity: []const u8,
     };
+
     const Trade = struct {
         product_id: []const u8,
         price: []const u8,
@@ -146,57 +147,71 @@ fn handleMessage(self: *Self, message: []const u8) !void {
         time: []const u8,
         side: []const u8,
     };
+
     const Event = struct {
-        type: []const u8 = "", // only here for updates?
+        type: []const u8 = "",
         product_id: []const u8 = "",
         updates: []const Update = &.{},
         trades: []const Trade = &.{},
     };
-    const Message = struct {
-        channel: []const u8,
-        events: []const Event,
-    };
+
+    channel: []const u8,
+    events: []const Event,
+};
+
+fn handleMessage(self: *Self, message: []const u8) !void {
     const parsed = try std.json.parseFromSlice(
-        Message,
+        CoinbaseMessage,
         self.gpa,
         message,
         .{ .ignore_unknown_fields = true },
     );
     defer parsed.deinit();
-    for (parsed.value.events) |event| {
-        for (event.trades) |trade| {
-            const ticker = trade.product_id;
-            if (self.trade_subscriptions.get(ticker)) |listeners| {
-                const maker_side: types.Side = try .parse(trade.side);
-                const parsed_trade: types.Trade = .{
-                    .ticker = ticker,
-                    .ts = try .parseIso8601(trade.time),
-                    .price = try .parse(trade.price),
-                    .size = try .parse(trade.size),
-                    .taker_side = maker_side.opposite(),
-                };
 
-                for (listeners.items) |listener| {
-                    listener.notify(listener.ptr, parsed_trade);
-                }
+    for (parsed.value.events) |event| {
+        try self.handleTrades(event.trades);
+        try self.handleUpdates(event.product_id, event.updates);
+    }
+}
+
+fn handleTrades(self: *Self, trades: []const CoinbaseMessage.Trade) !void {
+    for (trades) |trade| {
+        const ticker = trade.product_id;
+        if (self.trade_subscriptions.get(ticker)) |listeners| {
+            const maker_side: types.Side = try .parse(trade.side);
+            const parsed_trade: types.Trade = .{
+                .ticker = ticker,
+                .ts = try .parseIso8601(trade.time),
+                .price = try .parse(trade.price),
+                .size = try .parse(trade.size),
+                .taker_side = maker_side.opposite(),
+            };
+
+            for (listeners.items) |listener| {
+                listener.notify(listener.ptr, parsed_trade);
             }
         }
+    }
+}
 
-        for (event.updates) |update| {
-            const ticker = event.product_id;
-            if (self.update_subscriptions.get(ticker)) |listeners| {
-                const parsed_update: types.Update = .{
-                    .ticker = ticker,
-                    .ts = try .parseIso8601(update.event_time),
-                    .price = try .parse(update.price_level),
-                    .size = try .parse(update.new_quantity),
-                    .kind = .set,
-                    .side = try .parse(update.side),
-                };
+fn handleUpdates(
+    self: *const Self,
+    ticker: []const u8,
+    updates: []const CoinbaseMessage.Update,
+) !void {
+    for (updates) |update| {
+        if (self.update_subscriptions.get(ticker)) |listeners| {
+            const parsed_update: types.Update = .{
+                .ticker = ticker,
+                .ts = try .parseIso8601(update.event_time),
+                .price = try .parse(update.price_level),
+                .size = try .parse(update.new_quantity),
+                .kind = .set,
+                .side = try .parse(update.side),
+            };
 
-                for (listeners.items) |listener| {
-                    listener.notify(listener.ptr, parsed_update);
-                }
+            for (listeners.items) |listener| {
+                listener.notify(listener.ptr, parsed_update);
             }
         }
     }
