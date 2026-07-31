@@ -10,6 +10,7 @@ renderer: *c.SDL_Renderer,
 texture: *c.SDL_Texture,
 width: c_int,
 height: c_int,
+target_fps: u32,
 
 const Self = @This();
 
@@ -26,6 +27,7 @@ pub const Options = struct {
     resizeable: bool = false,
     high_pixel_density: bool = false,
     borderless: bool = false,
+    target_fps: u32 = 60,
 };
 
 fn expect(ok: bool) !void {
@@ -84,6 +86,7 @@ pub fn init(options: Options) !Self {
         .texture = texture,
         .width = width,
         .height = height,
+        .target_fps = options.target_fps,
     };
 }
 
@@ -114,6 +117,8 @@ pub fn run(self: *Self) !void {
     var microseconds: [10]i64 = undefined;
     var i: usize = 0;
     while (true) {
+        const start = c.SDL_GetTicksNS();
+
         var event: c.union_SDL_Event = undefined;
         while (c.SDL_PollEvent(&event)) {
             switch (event.type) {
@@ -152,10 +157,10 @@ pub fn run(self: *Self) !void {
             .height = @intCast(self.height),
         };
 
-        const start = std.Io.Clock.real.now(std.Options.debug_io);
+        const draw_start = std.Io.Clock.real.now(std.Options.debug_io);
         self.draw(self.userdata, canvas);
-        const end = std.Io.Clock.real.now(std.Options.debug_io);
-        microseconds[i] = end.toMicroseconds() - start.toMicroseconds();
+        const draw_end = std.Io.Clock.real.now(std.Options.debug_io);
+        microseconds[i] = draw_end.toMicroseconds() - draw_start.toMicroseconds();
         i += 1;
 
         if (i == microseconds.len) {
@@ -169,6 +174,16 @@ pub fn run(self: *Self) !void {
         try expect(c.SDL_RenderClear(self.renderer));
         try expect(c.SDL_RenderTexture(self.renderer, self.texture, null, null));
         try expect(c.SDL_RenderPresent(self.renderer));
+
+        const end = c.SDL_GetTicksNS();
+        const elapsed = end - start;
+        const target = @divFloor(1_000_000_000, self.target_fps);
+        if (elapsed < target) c.SDL_DelayNS(target - elapsed);
+
+        // std.debug.print("{}ms ({}ms)\n", .{
+        //     @divFloor(c.SDL_GetTicksNS() - start, 1_000_000),
+        //     @divFloor(end - start, 1_000_000),
+        // });
     }
 }
 
