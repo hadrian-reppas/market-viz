@@ -36,7 +36,7 @@ pub const Options = struct {
     padding: Padding,
 };
 
-pub fn draw(canvas: Window.Canvas, options: Options) void {
+pub fn draw(canvas: Window.Canvas, options: Options) Window.Rect {
     std.debug.assert(
         options.padding.left + options.padding.right + 2 * border_radius <=
             canvas.width,
@@ -49,6 +49,14 @@ pub fn draw(canvas: Window.Canvas, options: Options) void {
     canvas.fill(options.background_color);
     drawLines(canvas, options.border_color, options.padding);
     drawCorners(canvas, options);
+
+    const padding = options.padding;
+    return .{
+        .x = padding.left + border_radius,
+        .y = padding.top + border_radius,
+        .width = canvas.width - padding.left - padding.right - 2 * border_radius,
+        .height = canvas.height - padding.top - padding.bottom - 2 * border_radius,
+    };
 }
 
 fn drawLines(canvas: Window.Canvas, color: Window.Rgb, padding: Options.Padding) void {

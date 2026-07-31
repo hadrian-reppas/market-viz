@@ -11,7 +11,7 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
     var btc_buckets: [candles.bucket_count]Candles.Bucket = undefined;
-    var btc_candles = Candles.init(&btc_buckets, .@"5s");
+    var btc_candles = Candles.init(&btc_buckets, .@"10s");
     defer btc_candles.deinit();
 
     var kalshi_buckets: [candles.bucket_count]Candles.Bucket = undefined;

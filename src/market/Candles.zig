@@ -57,6 +57,12 @@ pub fn touch(self: *Self, ts: types.Ts) void {
 }
 
 // Consider calling `Candles.lock`
+pub fn touchNow(self: *Self) void {
+    const now = std.Io.Clock.real.now(std.Options.debug_io);
+    self.touch(.{ .microseconds = @intCast(now.toMicroseconds()) });
+}
+
+// Consider calling `Candles.lock`
 pub fn copy(self: *Self, dest: []Bucket) void {
     std.debug.assert(self.buckets.len == dest.len);
     if (self.head == 0) {
@@ -78,9 +84,8 @@ fn insertTrade(ptr: *anyopaque, trade: types.Trade) void {
     const candles: *Self = @ptrCast(@alignCast(ptr));
 
     candles.lock();
-    defer candles.unlock();
-
     candles.insert(trade.ts, trade.price, trade.size);
+    candles.unlock();
 }
 
 pub const Resolution = enum {

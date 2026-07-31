@@ -66,3 +66,17 @@ pub fn reverse(comptime row: []const u8) []const u8 {
     const result = reversed;
     return &result;
 }
+
+pub fn Lerp(Float: type) type {
+    return struct {
+        x1: Float,
+        x2: Float,
+        y1: Float,
+        y2: Float,
+
+        pub fn eval(self: @This(), x: Float) Float {
+            const a = (x - self.x1) / (self.x2 - self.x1);
+            return (1 - a) * self.y1 + a * self.y2;
+        }
+    };
+}
