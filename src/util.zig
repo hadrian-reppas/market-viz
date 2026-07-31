@@ -1,5 +1,23 @@
 const std = @import("std");
 
+pub const Mutex = struct {
+    mutex: std.c.pthread_mutex_t,
+
+    pub const init: Mutex = .{ .mutex = std.c.PTHREAD_MUTEX_INITIALIZER };
+
+    pub fn lock(self: *Mutex) void {
+        _ = std.c.pthread_mutex_lock(&self.mutex);
+    }
+
+    pub fn unlock(self: *Mutex) void {
+        _ = std.c.pthread_mutex_unlock(&self.mutex);
+    }
+
+    pub fn deinit(self: *Mutex) void {
+        _ = std.c.pthread_mutex_destroy(&self.mutex);
+    }
+};
+
 pub fn Subscriptions(Listener: type) type {
     return struct {
         gpa: std.mem.Allocator,

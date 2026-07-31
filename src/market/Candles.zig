@@ -1,7 +1,8 @@
 const std = @import("std");
 const types = @import("types.zig");
+const util = @import("../util.zig");
 
-mutex: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
+mutex: util.Mutex,
 buckets: []Bucket,
 resolution: Resolution,
 head: usize,
@@ -10,11 +11,16 @@ const Self = @This();
 
 pub fn init(buckets: []Bucket, resolution: Resolution) Self {
     @memset(buckets, .init(.zero));
-    return .{ .buckets = buckets, .resolution = resolution, .head = 0 };
+    return .{
+        .mutex = .init,
+        .buckets = buckets,
+        .resolution = resolution,
+        .head = 0,
+    };
 }
 
 pub fn deinit(self: *Self) void {
-    _ = std.c.pthread_mutex_destroy(&self.mutex);
+    self.mutex.deinit();
     self.* = undefined;
 }
 
@@ -26,22 +32,14 @@ fn get(self: *Self, index: usize) *Bucket {
     return &self.buckets[index % self.buckets.len];
 }
 
-pub fn lock(self: *Self) void {
-    _ = std.c.pthread_mutex_lock(&self.mutex);
-}
-
-pub fn unlock(self: *Self) void {
-    _ = std.c.pthread_mutex_unlock(&self.mutex);
-}
-
-// Consider calling `Candles.lock`
+// Consider calling `mutex.lock()`
 pub fn insert(self: *Self, ts: types.Ts, price: types.Price, size: types.Size) void {
     self.touch(ts);
     const index = self.indexOf(ts);
     self.get(index).insert(price, size);
 }
 
-// Consider calling `Candles.lock`
+// Consider calling `mutex.lock()`
 pub fn touch(self: *Self, ts: types.Ts) void {
     const new_head = self.indexOf(ts);
     for (0..self.buckets.len) |i| {
@@ -56,7 +54,7 @@ pub fn touch(self: *Self, ts: types.Ts) void {
     self.head = new_head;
 }
 
-// Consider calling `Candles.lock`
+// Consider calling `mutex.lock()`
 pub fn touchNow(self: *Self) void {
     const now = std.Io.Clock.real.now(std.Options.debug_io);
     self.touch(.{ .microseconds = @intCast(now.toMicroseconds()) });
@@ -83,9 +81,9 @@ pub fn listener(self: *Self) types.TradeListener {
 fn insertTrade(ptr: *anyopaque, trade: types.Trade) void {
     const candles: *Self = @ptrCast(@alignCast(ptr));
 
-    candles.lock();
+    candles.mutex.lock();
     candles.insert(trade.ts, trade.price, trade.size);
-    candles.unlock();
+    candles.mutex.unlock();
 }
 
 pub const Resolution = enum {

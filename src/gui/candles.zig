@@ -27,10 +27,10 @@ const flat_color = up_color;
 pub fn draw(ptr: *anyopaque, canvas: Window.Canvas) void {
     var buckets: [bucket_count]Candles.Bucket = undefined;
     const candles: *Candles = @ptrCast(@alignCast(ptr));
-    candles.lock();
+    candles.mutex.lock();
     candles.touchNow();
     candles.copy(&buckets);
-    candles.unlock();
+    candles.mutex.unlock();
 
     const cropped = canvas.crop(.{
         .x = 0,
