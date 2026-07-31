@@ -24,7 +24,7 @@ pub fn deinit(self: *Self) void {
     self.* = undefined;
 }
 
-fn indexOf(self: *Self, ts: types.Ts) usize {
+fn indexOf(self: *const Self, ts: types.Ts) usize {
     return ts.microseconds / self.resolution.toMicroseconds();
 }
 
@@ -33,10 +33,10 @@ fn get(self: *Self, index: usize) *Bucket {
 }
 
 // Consider calling `mutex.lock()`
-pub fn insert(self: *Self, ts: types.Ts, price: types.Price, size: types.Size) void {
-    self.touch(ts);
-    const index = self.indexOf(ts);
-    self.get(index).insert(price, size);
+pub fn insert(self: *Self, trade: types.Trade) void {
+    self.touch(trade.ts);
+    const index = self.indexOf(trade.ts);
+    self.get(index).insert(trade.price, trade.size);
 }
 
 // Consider calling `mutex.lock()`
@@ -82,7 +82,7 @@ fn insertTrade(ptr: *anyopaque, trade: types.Trade) void {
     const candles: *Self = @ptrCast(@alignCast(ptr));
 
     candles.mutex.lock();
-    candles.insert(trade.ts, trade.price, trade.size);
+    candles.insert(trade);
     candles.mutex.unlock();
 }
 
@@ -126,7 +126,7 @@ pub const Bucket = struct {
             .start = start,
             .open = .zero,
             .close = .zero,
-            .low = .inf,
+            .low = .infinity,
             .high = .zero,
             .volume = .zero,
             .notional = .zero,

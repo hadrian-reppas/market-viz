@@ -105,7 +105,9 @@ pub fn FixedPoint(n: u8) type {
         pub const digits = n;
         pub const scale = std.math.powi(Value, 10, digits) catch unreachable;
         pub const zero: Self = .{ .value = 0 };
-        pub const inf: Self = .{ .value = std.math.maxInt(Value) };
+        pub const epsilon: Self = .{ .value = 1 };
+        pub const one: Self = .{ .value = scale };
+        pub const infinity: Self = .{ .value = std.math.maxInt(Value) };
 
         value: Value,
 
@@ -166,6 +168,10 @@ pub fn FixedPoint(n: u8) type {
 
         pub fn add(a: Self, b: Self) Self {
             return .{ .value = a.value + b.value };
+        }
+
+        pub fn sub(a: Self, b: Self) Self {
+            return .{ .value = a.value - b.value };
         }
 
         pub fn min(a: Self, b: Self) Self {

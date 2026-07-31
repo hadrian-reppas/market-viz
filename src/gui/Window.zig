@@ -243,10 +243,16 @@ pub const Canvas = struct {
         self.rect(self.extent(), color);
     }
 
-    pub fn rect(self: Canvas, r: Rect, color: Rgb) void {
+    pub fn rectUnchecked(self: Canvas, r: Rect, color: Rgb) void {
+        std.debug.assert(r.x + r.width <= self.width);
+        std.debug.assert(r.y + r.height <= self.height);
         for (0..r.height) |i| {
             self.setMany(r.x, r.y + i, r.width, color);
         }
+    }
+
+    pub fn rect(self: Canvas, r: Rect, color: Rgb) void {
+        self.rectUnchecked(r.intersect(self.extent()), color);
     }
 
     pub fn bitmap(
