@@ -8,14 +8,12 @@ head: usize,
 
 const Self = @This();
 
-pub fn init(gpa: std.mem.Allocator, n: usize, resolution: Resolution) !Self {
-    const buckets = try gpa.alloc(Bucket, n);
+pub fn init(buckets: []Bucket, resolution: Resolution) Self {
     @memset(buckets, .init(.zero));
     return .{ .buckets = buckets, .resolution = resolution, .head = 0 };
 }
 
-pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
-    gpa.free(self.buckets);
+pub fn deinit(self: *Self) void {
     _ = std.c.pthread_mutex_destroy(&self.mutex);
     self.* = undefined;
 }

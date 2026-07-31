@@ -9,11 +9,13 @@ pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
 
-    var btc_candles = try Candles.init(gpa, 10, .@"5s");
-    defer btc_candles.deinit(gpa);
+    var btc_buckets: [10]Candles.Bucket = undefined;
+    var btc_candles = Candles.init(&btc_buckets, .@"5s");
+    defer btc_candles.deinit();
 
-    var kalshi_candles = try Candles.init(gpa, 10, .@"10s");
-    defer kalshi_candles.deinit(gpa);
+    var kalshi_buckets: [10]Candles.Bucket = undefined;
+    var kalshi_candles = Candles.init(&kalshi_buckets, .@"10s");
+    defer kalshi_candles.deinit();
 
     var network = try io.concurrent(networkMain, .{ gpa, io, &btc_candles, &kalshi_candles });
     errdefer network.cancel(io) catch {};
