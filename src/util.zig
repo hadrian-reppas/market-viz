@@ -39,3 +39,30 @@ pub fn Subscriptions(Listener: type) type {
         }
     };
 }
+
+pub fn flip_vertical(comptime bitmap: []const []const u8) []const []const u8 {
+    comptime var flipped: [bitmap.len][]const u8 = undefined;
+    inline for (bitmap, 0..) |row, i| {
+        flipped[bitmap.len - 1 - i] = row;
+    }
+    const result = flipped;
+    return &result;
+}
+
+pub fn flip_horizontal(comptime bitmap: []const []const u8) []const []const u8 {
+    comptime var flipped: [bitmap.len][]const u8 = undefined;
+    inline for (bitmap, 0..) |row, i| {
+        flipped[i] = reverse(row);
+    }
+    const result = flipped;
+    return &result;
+}
+
+pub fn reverse(comptime row: []const u8) []const u8 {
+    comptime var reversed: [row.len]u8 = undefined;
+    inline for (row, 0..) |value, i| {
+        reversed[row.len - 1 - i] = value;
+    }
+    const result = reversed;
+    return &result;
+}

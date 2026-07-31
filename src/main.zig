@@ -4,16 +4,17 @@ const Kalshi = @import("network/Kalshi.zig");
 const Coinbase = @import("network/Coinbase.zig");
 const Candles = @import("market/Candles.zig");
 const Window = @import("gui/Window.zig");
+const candles = @import("gui/candles.zig");
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
 
-    var btc_buckets: [10]Candles.Bucket = undefined;
+    var btc_buckets: [candles.bucket_count]Candles.Bucket = undefined;
     var btc_candles = Candles.init(&btc_buckets, .@"5s");
     defer btc_candles.deinit();
 
-    var kalshi_buckets: [10]Candles.Bucket = undefined;
+    var kalshi_buckets: [candles.bucket_count]Candles.Bucket = undefined;
     var kalshi_candles = Candles.init(&kalshi_buckets, .@"10s");
     defer kalshi_candles.deinit();
 
@@ -21,8 +22,8 @@ pub fn main(init: std.process.Init) !void {
     errdefer network.cancel(io) catch {};
 
     var window = try Window.init(.{
-        .userdata = @constCast(&0),
-        .draw = drawNothing,
+        .userdata = &btc_candles,
+        .draw = candles.draw,
         .mode = .{ .windowed = .{ .width = 1280, .height = 720 } },
         .high_pixel_density = true,
         .borderless = true,
@@ -35,26 +36,6 @@ pub fn main(init: std.process.Init) !void {
         error.Canceled => {},
         else => std.debug.print("network thread error: {}\n", .{err}),
     };
-
-    var buf: [1024]u8 = undefined;
-    var stdout_writer = std.Io.File.stdout().writer(io, &buf);
-    const stdout = &stdout_writer.interface;
-
-    var buckets: [10]Candles.Bucket = undefined;
-
-    btc_candles.copy(&buckets);
-    for (buckets) |bucket| {
-        try bucket.print(stdout);
-        try stdout.writeAll("\n");
-    }
-    try stdout.writeAll("\n");
-
-    kalshi_candles.copy(&buckets);
-    for (buckets) |bucket| {
-        try bucket.print(stdout);
-        try stdout.writeAll("\n");
-    }
-    try stdout.flush();
 }
 
 fn drawNothing(_: *anyopaque, _: Window.Canvas) void {}

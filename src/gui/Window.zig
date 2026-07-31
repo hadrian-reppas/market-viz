@@ -147,6 +147,7 @@ pub fn run(self: *Self) !void {
 
         const canvas: Canvas = .{
             .pixels = @ptrCast(pixels.?),
+            .stride = @intCast(self.width),
             .width = @intCast(self.width),
             .height = @intCast(self.height),
         };
@@ -171,17 +172,16 @@ pub fn run(self: *Self) !void {
     }
 }
 
-pub const Color = [4]u8;
 pub const Rgb = [3]u8;
 pub const Rgba = [4]u8;
 
-pub const Rectangle = struct {
+pub const Rect = struct {
     x: usize,
     y: usize,
     width: usize,
     height: usize,
 
-    pub fn intersect(a: Rectangle, b: Rectangle) Rectangle {
+    pub fn intersect(a: Rect, b: Rect) Rect {
         const left = @max(a.x, b.x);
         const right = @min(a.x + a.width, b.x + b.width);
         const top = @max(a.y, b.y);
@@ -194,89 +194,91 @@ pub const Rectangle = struct {
 
 pub const Canvas = struct {
     pixels: [*]u8,
+    stride: usize,
     width: usize,
     height: usize,
 
-    pub fn set(self: Canvas, x: usize, y: usize, color: Color) void {
-        const index = 4 * (x + y * self.width);
-        const pixel = self.pixels[index..][0..4];
-        @memcpy(pixel, &color);
+    pub fn indexOf(self: Canvas, x: usize, y: usize) usize {
+        return 4 * (x + y * self.stride);
     }
 
-    pub fn setMany(self: Canvas, x: usize, y: usize, n: usize, color: Color) void {
-        const index = 4 * (x + y * self.width);
+    pub fn set(self: Canvas, x: usize, y: usize, color: Rgb) void {
+        std.debug.assert(x < self.width);
+        std.debug.assert(y < self.height);
+
+        const index = self.indexOf(x, y);
+        const pixel = self.pixels[index..][0..4];
+        const rgba = color ++ .{255};
+        @memcpy(pixel, &rgba);
+    }
+
+    pub fn setMany(self: Canvas, x: usize, y: usize, n: usize, color: Rgb) void {
+        std.debug.assert(x + n <= self.width);
+        std.debug.assert(y < self.height);
+
+        const index = self.indexOf(x, y);
         const start: [*]u32 = @ptrCast(@alignCast(self.pixels + index));
         const slice = start[0..n];
-        const int = std.mem.readInt(u32, &color, .native);
+        const rgba = color ++ .{255};
+        const int = std.mem.readInt(u32, &rgba, .native);
         @memset(slice, int);
     }
 
-    pub fn frame(self: Canvas, rect: Rectangle) Frame {
-        return .{ .canvas = self, .frame = rect.intersect(self.full()) };
+    pub fn fill(self: Canvas, color: Rgb) void {
+        self.rect(self.extent(), color);
     }
 
-    pub fn frameFull(self: Canvas) Frame {
-        return .{ .canvas = self, .frame = self.full() };
-    }
-
-    pub fn full(self: Canvas) Rectangle {
-        return .{
-            .x = 0,
-            .y = 0,
-            .width = self.width,
-            .height = self.height,
-        };
-    }
-};
-
-pub const Frame = struct {
-    canvas: Canvas,
-    frame: Rectangle,
-
-    pub fn set(self: Frame, x: usize, y: usize, color: Color) void {
-        if (x >= self.frame.width or y >= self.frame.height) return;
-        self.setUnchecked(x, y, color);
-    }
-
-    pub fn setUnchecked(self: Frame, x: usize, y: usize, color: Color) void {
-        self.canvas.set(self.frame.x + x, self.frame.y + y, color);
-    }
-
-    pub fn setMany(self: Frame, x: usize, y: usize, n: usize, color: Color) void {
-        if (x >= self.frame.width or y >= self.frame.height) return;
-        self.setManyUnchecked(x, y, @min(n, self.frame.width - x), color);
-    }
-
-    pub fn setManyUnchecked(self: Frame, x: usize, y: usize, n: usize, color: Color) void {
-        self.canvas.setMany(
-            self.frame.x + x,
-            self.frame.y + y,
-            @min(n, self.frame.width - x),
-            color,
-        );
-    }
-
-    pub fn rectangle(self: Frame, rect: Rectangle, color: Color) void {
-        const intersection = rect.intersect(self.full());
-        self.rectangleUnchecked(intersection, color);
-    }
-
-    pub fn rectangleUnchecked(self: Frame, rect: Rectangle, color: Color) void {
-        for (0..rect.height) |i| {
-            self.setManyUnchecked(rect.x, rect.y + i, rect.width, color);
+    pub fn rect(self: Canvas, r: Rect, color: Rgb) void {
+        for (0..r.height) |i| {
+            self.setMany(r.x, r.y + i, r.width, color);
         }
     }
 
-    pub fn fill(self: Frame, color: Color) void {
-        self.rectangle(self.full(), color);
+    pub fn bitmap(
+        self: Canvas,
+        r: Rect,
+        alphas: []const []const u8,
+        fg_color: Rgb,
+        bg_color: Rgb,
+    ) void {
+        std.debug.assert(alphas.len > 0);
+        std.debug.assert(r.width <= alphas[0].len);
+        std.debug.assert(r.height <= alphas.len);
+        std.debug.assert(r.x + r.width <= self.width);
+        std.debug.assert(r.y + r.height <= self.height);
+
+        for (0..r.height) |i| {
+            for (0..r.width) |j| {
+                const alpha = @as(f32, @floatFromInt(alphas[i][j])) / 255;
+                const fg_f32: @Vector(3, f32) = @floatFromInt(
+                    @as(@Vector(3, u8), fg_color),
+                );
+                const bg_f32: @Vector(3, f32) = @floatFromInt(
+                    @as(@Vector(3, u8), bg_color),
+                );
+                const color_f32: @Vector(3, f32) =
+                    @as(@Vector(3, f32), @splat(1 - alpha)) * bg_f32 +
+                    @as(@Vector(3, f32), @splat(alpha)) * fg_f32;
+                const color: @Vector(3, u8) = @round(color_f32);
+                self.set(r.x + j, r.y + i, color);
+            }
+        }
     }
 
-    pub fn full(self: Frame) Rectangle {
+    pub fn crop(self: Canvas, r: Rect) Canvas {
+        std.debug.assert(r.x + r.width <= self.width);
+        std.debug.assert(r.y + r.height <= self.height);
+
+        const index = self.indexOf(r.x, r.y);
         return .{
-            .x = 0,
-            .y = 0,
-            .width = self.frame.width,
-            .height = self.frame.height,
+            .pixels = self.pixels + index,
+            .stride = self.stride,
+            .width = r.width,
+            .height = r.height,
         };
+    }
+
+    pub fn extent(self: Canvas) Rect {
+        return .{ .x = 0, .y = 0, .width = self.width, .height = self.height };
     }
 };
