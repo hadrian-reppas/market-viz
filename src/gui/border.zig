@@ -92,47 +92,31 @@ fn drawLines(canvas: Window.Canvas, color: Window.Rgb, padding: Options.Padding)
 fn drawCorners(canvas: Window.Canvas, options: Options) void {
     const padding = options.padding;
     canvas.bitmap(
-        .{
-            .x = padding.left,
-            .y = padding.top,
-            .width = border_radius,
-            .height = border_radius,
-        },
+        padding.left,
+        padding.top,
         top_left_bitmap,
         options.border_color,
-        options.background_color,
+        null,
     );
     canvas.bitmap(
-        .{
-            .x = canvas.width - padding.right - border_radius,
-            .y = padding.top,
-            .width = border_radius,
-            .height = border_radius,
-        },
+        canvas.width - padding.right - border_radius,
+        padding.top,
         top_right_bitmap,
         options.border_color,
-        options.background_color,
+        null,
     );
     canvas.bitmap(
-        .{
-            .x = padding.left,
-            .y = canvas.height - padding.bottom - border_radius,
-            .width = border_radius,
-            .height = border_radius,
-        },
+        padding.left,
+        canvas.height - padding.bottom - border_radius,
         bottom_left_bitmap,
         options.border_color,
-        options.background_color,
+        null,
     );
     canvas.bitmap(
-        .{
-            .x = canvas.width - padding.right - border_radius,
-            .y = canvas.height - padding.bottom - border_radius,
-            .width = border_radius,
-            .height = border_radius,
-        },
+        canvas.width - padding.right - border_radius,
+        canvas.height - padding.bottom - border_radius,
         bottom_right_bitmap,
         options.border_color,
-        options.background_color,
+        null,
     );
 }

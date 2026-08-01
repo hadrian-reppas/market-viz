@@ -37,13 +37,32 @@ pub fn draw(ptr: *anyopaque, canvas: Window.Canvas) void {
     candles.copy(&buckets);
     candles.mutex.unlock();
 
+    // TODO: remove this
+    // ---- text test code ----
     canvas.rect(
-        .{ .x = 0, .y = 950, .width = 300, .height = 400 },
+        .{ .x = 0, .y = 750, .width = 900, .height = 500 },
         .{ 255, 255, 255 },
     );
-    text.draw(canvas, fonts.roboto_light20, "Hello", 50, 1000);
-    text.draw(canvas, fonts.roboto_light30, "Hello", 50, 1060);
-    text.draw(canvas, fonts.roboto_light40, "Hello", 50, 1120);
+    const content = "Hell$";
+    for (std.enums.values(text.Alignment.Horizontal), 0..) |h, i| {
+        for (std.enums.values(text.Alignment.Vertical), 0..) |v, j| {
+            const alignment: text.Alignment = .{ .vertical = v, .horizontal = h };
+            const x = 150 + 200 * @as(i32, @intCast(j));
+            const y = 900 + 100 * @as(i32, @intCast(i));
+            const box = text.boundingBox(x, y, alignment, fonts.roboto_light40, content);
+            canvas.rect(box, .{ 200, 255, 200 });
+            text.draw(canvas, x, y, alignment, fonts.roboto_light40, content);
+            canvas.rect(
+                .{ .x = x - 80, .y = y, .width = 160, .height = 1 },
+                .{ 255, 0, 0 },
+            );
+            canvas.rect(
+                .{ .x = x, .y = y - 40, .width = 1, .height = 80 },
+                .{ 255, 0, 0 },
+            );
+        }
+    }
+    // ------------------------
 
     const cropped = canvas.crop(.{
         .x = 0,

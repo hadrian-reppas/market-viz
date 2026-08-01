@@ -38,8 +38,6 @@ pub fn main(init: std.process.Init) !void {
     };
 }
 
-fn drawNothing(_: *anyopaque, _: Window.Canvas) void {}
-
 fn runCoinbase(coinbase: *Coinbase) std.Io.Cancelable!void {
     coinbase.run() catch |err| switch (err) {
         error.Canceled => |e| return e,

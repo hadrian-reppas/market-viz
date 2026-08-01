@@ -27,15 +27,16 @@ pub const Options = struct {
     resizeable: bool = false,
     high_pixel_density: bool = false,
     borderless: bool = false,
+    focus: bool = true,
     target_fps: u32 = 60,
 };
 
-fn expect(ok: bool) !void {
+fn check(ok: bool) !void {
     if (!ok) return error.SdlError;
 }
 
 pub fn init(options: Options) !Self {
-    try expect(c.SDL_Init(c.SDL_INIT_VIDEO));
+    try check(c.SDL_Init(c.SDL_INIT_VIDEO));
     errdefer c.SDL_Quit();
 
     var flags: c.SDL_WindowFlags = 0;
@@ -59,10 +60,13 @@ pub fn init(options: Options) !Self {
     ) orelse return error.SdlError;
     errdefer c.SDL_DestroyWindow(window);
 
+    if (options.focus)
+        try check(c.SDL_RaiseWindow(window));
+
     if (options.mode == .fullscreen) {
-        try expect(c.SDL_SetWindowFullscreen(window, true));
-        try expect(c.SDL_HideCursor());
-        try expect(c.SDL_SetHint(c.SDL_HINT_VIDEO_MAC_FULLSCREEN_MENU_VISIBILITY, "1"));
+        try check(c.SDL_SetWindowFullscreen(window, true));
+        try check(c.SDL_HideCursor());
+        try check(c.SDL_SetHint(c.SDL_HINT_VIDEO_MAC_FULLSCREEN_MENU_VISIBILITY, "1"));
     }
 
     const renderer = c.SDL_CreateRenderer(window, null) orelse return error.SdlError;
@@ -73,7 +77,7 @@ pub fn init(options: Options) !Self {
 
     var width: c_int = undefined;
     var height: c_int = undefined;
-    try expect(c.SDL_GetCurrentRenderOutputSize(renderer, &width, &height));
+    try check(c.SDL_GetCurrentRenderOutputSize(renderer, &width, &height));
 
     const texture = try createTexture(renderer, width, height);
     errdefer c.SDL_DestroyTexture(texture);
@@ -100,7 +104,7 @@ fn createTexture(renderer: *c.SDL_Renderer, width: c_int, height: c_int) !*c.SDL
     ) orelse return error.SdlError;
 
     // TODO: figure out what this does
-    try expect(c.SDL_SetTextureBlendMode(texture, c.SDL_BLENDMODE_NONE));
+    try check(c.SDL_SetTextureBlendMode(texture, c.SDL_BLENDMODE_NONE));
 
     return texture;
 }
@@ -125,10 +129,10 @@ pub fn run(self: *Self) !void {
                 c.SDL_EVENT_QUIT, c.SDL_EVENT_WINDOW_CLOSE_REQUESTED => return,
                 c.SDL_EVENT_MOUSE_MOTION => {
                     if (event.motion.xrel != 0.0 or event.motion.yrel != 0)
-                        try expect(c.SDL_ShowCursor());
+                        try check(c.SDL_ShowCursor());
                 },
                 c.SDL_EVENT_WINDOW_RESIZED => {
-                    try expect(c.SDL_GetCurrentRenderOutputSize(
+                    try check(c.SDL_GetCurrentRenderOutputSize(
                         self.renderer,
                         &self.width,
                         &self.height,
@@ -148,7 +152,7 @@ pub fn run(self: *Self) !void {
 
         var pixels: ?*anyopaque = undefined;
         var pitch: c_int = undefined;
-        try expect(c.SDL_LockTexture(self.texture, null, &pixels, &pitch));
+        try check(c.SDL_LockTexture(self.texture, null, &pixels, &pitch));
 
         const canvas: Canvas = .{
             .pixels = @ptrCast(pixels.?),
@@ -171,9 +175,9 @@ pub fn run(self: *Self) !void {
         }
 
         c.SDL_UnlockTexture(self.texture);
-        try expect(c.SDL_RenderClear(self.renderer));
-        try expect(c.SDL_RenderTexture(self.renderer, self.texture, null, null));
-        try expect(c.SDL_RenderPresent(self.renderer));
+        try check(c.SDL_RenderClear(self.renderer));
+        try check(c.SDL_RenderTexture(self.renderer, self.texture, null, null));
+        try check(c.SDL_RenderPresent(self.renderer));
 
         const end = c.SDL_GetTicksNS();
         const elapsed = end - start;
@@ -228,6 +232,12 @@ pub const Canvas = struct {
         @memcpy(pixel, &rgba);
     }
 
+    pub fn get(self: Canvas, x: i32, y: i32) Rgb {
+        const index = self.indexOf(x, y);
+        const pixel = self.pixels[index..][0..3];
+        return pixel.*;
+    }
+
     pub fn setMany(self: Canvas, x: i32, y: i32, n: i32, color: Rgb) void {
         std.debug.assert(n >= 0);
         std.debug.assert(x + n <= self.width);
@@ -259,35 +269,48 @@ pub const Canvas = struct {
 
     pub fn bitmap(
         self: Canvas,
-        r: Rect,
+        x: i32,
+        y: i32,
         alphas: []const []const u8,
-        fg_color: Rgb,
-        bg_color: Rgb,
+        color: Rgb,
+        clip_opt: ?Rect,
     ) void {
-        std.debug.assert(alphas.len > 0);
-        std.debug.assert(r.width <= alphas[0].len);
-        std.debug.assert(r.height <= alphas.len);
-        std.debug.assert(r.x + r.width <= self.width);
-        std.debug.assert(r.y + r.height <= self.height);
+        const clip = if (clip_opt) |clip| clip else Rect{
+            .x = 0,
+            .y = 0,
+            .width = if (alphas.len == 0) 0 else @intCast(alphas[0].len),
+            .height = @intCast(alphas.len),
+        };
 
-        for (0..@intCast(r.height)) |i| {
-            for (0..@intCast(r.width)) |j| {
-                const alpha = @as(f32, @floatFromInt(alphas[i][j])) / 255;
-                const fg_f32: @Vector(3, f32) = @floatFromInt(
-                    @as(@Vector(3, u8), fg_color),
-                );
-                const bg_f32: @Vector(3, f32) = @floatFromInt(
-                    @as(@Vector(3, u8), bg_color),
-                );
-                const color_f32: @Vector(3, f32) =
-                    @as(@Vector(3, f32), @splat(1 - alpha)) * bg_f32 +
-                    @as(@Vector(3, f32), @splat(alpha)) * fg_f32;
-                const color: @Vector(3, u8) = @round(color_f32);
-                self.set(
-                    r.x + @as(i32, @intCast(j)),
-                    r.y + @as(i32, @intCast(i)),
-                    color,
-                );
+        std.debug.assert(clip.width >= 0 and clip.height >= 0);
+        std.debug.assert(clip.x >= 0 and clip.y >= 0);
+        std.debug.assert(alphas.len == 0 or clip.x + clip.width <= alphas[0].len);
+        std.debug.assert(clip.y + clip.height <= alphas.len);
+        std.debug.assert(x + clip.width <= self.width);
+        std.debug.assert(y + clip.height <= self.height);
+
+        const clip_x: usize = @intCast(clip.x);
+        const clip_y: usize = @intCast(clip.y);
+        const u8x3 = @Vector(3, u8);
+        const f32x3 = @Vector(3, f32);
+
+        for (0..@intCast(clip.height)) |i| {
+            for (0..@intCast(clip.width)) |j| {
+                const pixel_x = x + @as(i32, @intCast(j));
+                const pixel_y = y + @as(i32, @intCast(i));
+
+                const alpha = @as(f32, @floatFromInt(alphas[clip_y + i][clip_x + j])) / 255;
+                const color_u8: u8x3 = color;
+                const background_u8: u8x3 = self.get(pixel_x, pixel_y);
+                const color_f32: f32x3 = @floatFromInt(color_u8);
+                const background_f32: f32x3 = @floatFromInt(background_u8);
+
+                const a: f32x3 = @splat(alpha);
+                const @"1 - a": f32x3 = @splat(1 - alpha);
+                const blended_f32: f32x3 = @"1 - a" * background_f32 + a * color_f32;
+                const blended: u8x3 = @round(blended_f32);
+
+                self.set(pixel_x, pixel_y, blended);
             }
         }
     }
