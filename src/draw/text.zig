@@ -10,6 +10,33 @@ pub const Alignment = struct {
     horizontal: Horizontal,
 };
 
+pub const test_drawer = @import("layout.zig").Drawer.stateless(drawTextTest);
+
+// TODO: remove
+fn drawTextTest(canvas: Window.Canvas) void {
+    const text = "Hell$";
+
+    canvas.fill(.{ 255, 255, 255 });
+    for (std.enums.values(Alignment.Horizontal), 0..) |h, i| {
+        for (std.enums.values(Alignment.Vertical), 0..) |v, j| {
+            const alignment: Alignment = .{ .vertical = v, .horizontal = h };
+            const x = 150 + 200 * @as(i32, @intCast(j));
+            const y = 100 + 100 * @as(i32, @intCast(i));
+            const box = boundingBox(x, y, alignment, fonts.roboto_light40, text);
+            canvas.rect(box, .{ 200, 255, 200 });
+            draw(canvas, x, y, alignment, fonts.roboto_light40, text);
+            canvas.rect(
+                .{ .x = x - 80, .y = y, .width = 160, .height = 1 },
+                .{ 255, 0, 0 },
+            );
+            canvas.rect(
+                .{ .x = x, .y = y - 40, .width = 1, .height = 80 },
+                .{ 255, 0, 0 },
+            );
+        }
+    }
+}
+
 pub fn boundingBox(
     x: i32,
     y: i32,

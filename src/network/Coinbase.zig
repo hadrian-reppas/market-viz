@@ -188,7 +188,7 @@ fn handleTrades(self: *Self, trades: []const CoinbaseMessage.Trade) !void {
             };
 
             for (listeners.items) |listener| {
-                listener.notify(listener.ptr, parsed_trade);
+                listener.notify(parsed_trade);
             }
         }
     }
@@ -211,7 +211,7 @@ fn handleUpdates(
             };
 
             for (listeners.items) |listener| {
-                listener.notify(listener.ptr, parsed_update);
+                listener.notify(parsed_update);
             }
         }
     }

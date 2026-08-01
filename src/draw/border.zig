@@ -2,6 +2,7 @@ const std = @import("std");
 const Window = @import("Window.zig");
 const util = @import("../util.zig");
 
+// TODO: compute these based on circle math (for any radius)
 const top_left_bitmap: []const []const u8 = &.{
     &.{ 0, 0, 0, 0, 0, 0, 0, 37, 122, 188 },
     &.{ 0, 0, 0, 0, 0, 37, 160, 255, 255, 255 },

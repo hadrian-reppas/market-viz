@@ -200,7 +200,7 @@ fn handleTradeMessage(self: *Self, message: []const u8) !void {
         };
 
         for (listeners.items) |listener| {
-            listener.notify(listener.ptr, parsed_trade);
+            listener.notify(parsed_trade);
         }
     }
 }
@@ -233,7 +233,7 @@ fn handleSnapshotMessage(self: *Self, message: []const u8) !void {
             };
 
             for (listeners.items) |listener| {
-                listener.notify(listener.ptr, update);
+                listener.notify(update);
             }
         }
         for (msg.yes_dollars_fp) |entry| {
@@ -247,7 +247,7 @@ fn handleSnapshotMessage(self: *Self, message: []const u8) !void {
             };
 
             for (listeners.items) |listener| {
-                listener.notify(listener.ptr, update);
+                listener.notify(update);
             }
         }
     }
@@ -290,7 +290,7 @@ fn handleDeltaMessage(self: *Self, message: []const u8) !void {
         };
 
         for (listeners.items) |listener| {
-            listener.notify(listener.ptr, update);
+            listener.notify(update);
         }
     }
 }

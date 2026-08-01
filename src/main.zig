@@ -3,27 +3,32 @@ const secrets = @import("secrets.zig");
 const Kalshi = @import("network/Kalshi.zig");
 const Coinbase = @import("network/Coinbase.zig");
 const Candles = @import("market/Candles.zig");
-const Window = @import("gui/Window.zig");
-const candles = @import("gui/candles.zig");
+const Window = @import("draw/Window.zig");
+const candles = @import("draw/candles.zig");
+const layout = @import("draw/layout.zig");
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
 
     var btc_buckets: [candles.bucket_count]Candles.Bucket = undefined;
-    var btc_candles = Candles.init(&btc_buckets, .@"10s");
+    var btc_candles = Candles.init(&btc_buckets, .@"1s");
     defer btc_candles.deinit();
 
     var kalshi_buckets: [candles.bucket_count]Candles.Bucket = undefined;
-    var kalshi_candles = Candles.init(&kalshi_buckets, .@"10s");
+    var kalshi_candles = Candles.init(&kalshi_buckets, .@"1s");
     defer kalshi_candles.deinit();
 
     var network = try io.concurrent(networkMain, .{ gpa, io, &btc_candles, &kalshi_candles });
     errdefer network.cancel(io) catch {};
 
+    const grid: layout.Grid = .{ .children = &.{
+        &.{ btc_candles.drawer(), kalshi_candles.drawer() },
+        &.{ @import("draw/text.zig").test_drawer, layout.Drawer.nop },
+    } };
+
     var window = try Window.init(.{
-        .userdata = &btc_candles,
-        .draw = candles.draw,
+        .drawer = grid.drawer(),
         .mode = .{ .windowed = .{ .width = 1280, .height = 720 } },
         .high_pixel_density = true,
         .borderless = true,
@@ -72,7 +77,7 @@ fn networkMain(
     });
     defer kalshi.deinit();
 
-    try kalshi.subscribeToTrades("KXBTC15M-26JUL301945-45", kalshi_candles.listener());
+    try kalshi.subscribeToTrades("KXBTC15M-26AUG011415-15", kalshi_candles.listener());
 
     var group: std.Io.Group = .init;
     defer group.cancel(io);

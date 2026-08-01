@@ -2,9 +2,9 @@ const std = @import("std");
 const c = @cImport({
     @cInclude("SDL3/SDL.h");
 });
+const layout = @import("layout.zig");
 
-userdata: *anyopaque,
-draw: *const fn (*anyopaque, Canvas) void,
+drawer: layout.Drawer,
 window: *c.SDL_Window,
 renderer: *c.SDL_Renderer,
 texture: *c.SDL_Texture,
@@ -20,8 +20,7 @@ pub const Mode = union(enum) {
 };
 
 pub const Options = struct {
-    userdata: *anyopaque,
-    draw: *const fn (*anyopaque, Canvas) void,
+    drawer: layout.Drawer,
     name: [:0]const u8 = "MarketViz",
     mode: Mode = .fullscreen,
     resizeable: bool = false,
@@ -83,8 +82,7 @@ pub fn init(options: Options) !Self {
     errdefer c.SDL_DestroyTexture(texture);
 
     return .{
-        .userdata = options.userdata,
-        .draw = options.draw,
+        .drawer = options.drawer,
         .window = window,
         .renderer = renderer,
         .texture = texture,
@@ -162,7 +160,7 @@ pub fn run(self: *Self) !void {
         };
 
         const draw_start = std.Io.Clock.real.now(std.Options.debug_io);
-        self.draw(self.userdata, canvas);
+        self.drawer.draw(canvas);
         const draw_end = std.Io.Clock.real.now(std.Options.debug_io);
         microseconds[i] = draw_end.toMicroseconds() - draw_start.toMicroseconds();
         i += 1;
@@ -171,7 +169,7 @@ pub fn run(self: *Self) !void {
             i = 0;
             // var sum: i64 = 0;
             // for (microseconds) |m| sum += m;
-            // std.debug.print("{}us\n", .{@divFloor(sum, microseconds.len)});
+            // std.debug.print("draw = {}us\n", .{@divFloor(sum, microseconds.len)});
         }
 
         c.SDL_UnlockTexture(self.texture);
@@ -184,9 +182,9 @@ pub fn run(self: *Self) !void {
         const target = @divFloor(1_000_000_000, self.target_fps);
         if (elapsed < target) c.SDL_DelayNS(target - elapsed);
 
-        // std.debug.print("{}ms ({}ms)\n", .{
-        //     @divFloor(c.SDL_GetTicksNS() - start, 1_000_000),
-        //     @divFloor(end - start, 1_000_000),
+        // std.debug.print("working = {}us, total = {}us\n", .{
+        //     @divFloor(end - start, 1000),
+        //     @divFloor(c.SDL_GetTicksNS() - start, 1000),
         // });
     }
 }

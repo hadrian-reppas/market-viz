@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const util = @import("../util.zig");
+const layout = @import("../draw/layout.zig");
 
 mutex: util.Mutex,
 buckets: []Bucket,
@@ -75,15 +76,7 @@ pub fn copy(self: *Self, dest: []Bucket) void {
 }
 
 pub fn listener(self: *Self) types.TradeListener {
-    return .{ .ptr = self, .notify = insertTrade };
-}
-
-fn insertTrade(ptr: *anyopaque, trade: types.Trade) void {
-    const candles: *Self = @ptrCast(@alignCast(ptr));
-
-    candles.mutex.lock();
-    candles.insert(trade);
-    candles.mutex.unlock();
+    return .{ .ptr = self, .func = insertTrade };
 }
 
 pub const Resolution = enum {
@@ -168,3 +161,18 @@ pub const Bucket = struct {
         try w.writeAll(" }");
     }
 };
+
+fn insertTrade(ptr: *anyopaque, trade: types.Trade) void {
+    const candles: *Self = @ptrCast(@alignCast(ptr));
+
+    candles.mutex.lock();
+    candles.insert(trade);
+    candles.mutex.unlock();
+}
+
+pub fn drawer(self: *Self) layout.Drawer {
+    return .{
+        .ptr = @ptrCast(self),
+        .func = @import("../draw/candles.zig").draw,
+    };
+}

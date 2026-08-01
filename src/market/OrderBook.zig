@@ -22,7 +22,7 @@ pub fn insert(_: *Self, _: types.Update) !void {}
 pub fn copy(_: *const Self) []PriceLevel {}
 
 pub fn listener(self: *Self) types.UpdateListener {
-    return .{ .ptr = self, .notify = insertUpdate };
+    return .{ .ptr = self, .func = insertUpdate };
 }
 
 pub fn insertUpdate(ptr: *anyopaque, update: types.Update) void {

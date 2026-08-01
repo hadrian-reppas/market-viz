@@ -221,7 +221,11 @@ test "FixedPoint" {
 
 pub const TradeListener = struct {
     ptr: *anyopaque,
-    notify: *const fn (*anyopaque, Trade) void,
+    func: *const fn (*anyopaque, Trade) void,
+
+    pub fn notify(self: @This(), trade: Trade) void {
+        self.func(self.ptr, trade);
+    }
 
     pub fn printer(w: *std.Io.Writer) TradeListener {
         return .{
@@ -233,7 +237,11 @@ pub const TradeListener = struct {
 
 pub const UpdateListener = struct {
     ptr: *anyopaque,
-    notify: *const fn (*anyopaque, Update) void,
+    func: *const fn (*anyopaque, Update) void,
+
+    pub fn notify(self: @This(), update: Update) void {
+        self.func(self.ptr, update);
+    }
 
     pub fn printer(w: *std.Io.Writer) UpdateListener {
         return .{

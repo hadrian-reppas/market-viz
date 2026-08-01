@@ -4,8 +4,6 @@ const Candles = @import("../market/Candles.zig");
 const Window = @import("Window.zig");
 const border = @import("border.zig");
 const util = @import("../util.zig");
-const text = @import("text.zig");
-const fonts = @import("fonts");
 
 pub const bucket_count = 64;
 
@@ -31,46 +29,20 @@ const flat_color = up_color;
 
 pub fn draw(ptr: *anyopaque, canvas: Window.Canvas) void {
     var buckets: [bucket_count]Candles.Bucket = undefined;
+
     const candles: *Candles = @ptrCast(@alignCast(ptr));
     candles.mutex.lock();
     candles.touchNow();
     candles.copy(&buckets);
     candles.mutex.unlock();
 
-    // TODO: remove this
-    // ---- text test code ----
-    canvas.rect(
-        .{ .x = 0, .y = 750, .width = 900, .height = 500 },
-        .{ 255, 255, 255 },
-    );
-    const content = "Hell$";
-    for (std.enums.values(text.Alignment.Horizontal), 0..) |h, i| {
-        for (std.enums.values(text.Alignment.Vertical), 0..) |v, j| {
-            const alignment: text.Alignment = .{ .vertical = v, .horizontal = h };
-            const x = 150 + 200 * @as(i32, @intCast(j));
-            const y = 900 + 100 * @as(i32, @intCast(i));
-            const box = text.boundingBox(x, y, alignment, fonts.roboto_light40, content);
-            canvas.rect(box, .{ 200, 255, 200 });
-            text.draw(canvas, x, y, alignment, fonts.roboto_light40, content);
-            canvas.rect(
-                .{ .x = x - 80, .y = y, .width = 160, .height = 1 },
-                .{ 255, 0, 0 },
-            );
-            canvas.rect(
-                .{ .x = x, .y = y - 40, .width = 1, .height = 80 },
-                .{ 255, 0, 0 },
-            );
-        }
-    }
-    // ------------------------
+    drawBuckets(canvas, &buckets);
+}
 
-    const cropped = canvas.crop(.{
-        .x = 0,
-        .y = 0,
-        .width = @divExact(canvas.width, 2),
-        .height = @divExact(canvas.height, 2),
-    });
-    const interior = border.draw(cropped, .{
+pub fn drawBuckets(canvas: Window.Canvas, buckets: []const Candles.Bucket) void {
+    // TODO: add some assertions about canvas size?
+
+    const interior = border.draw(canvas, .{
         .background_color = background_color,
         .border_color = border_color,
         .padding = .{
@@ -80,9 +52,9 @@ pub fn draw(ptr: *anyopaque, canvas: Window.Canvas) void {
             .bottom = border.interior_padding,
         },
     });
-    const chart = cropped.crop(interior);
+    const chart = canvas.crop(interior);
 
-    const min_price, const max_price = getPriceBounds(&buckets) orelse
+    const min_price, const max_price = getPriceBounds(buckets) orelse
         .{ default_min_price, default_max_price };
     const y_min, const y_max = getYAxisBounds(min_price, max_price);
 
@@ -94,7 +66,7 @@ pub fn draw(ptr: *anyopaque, canvas: Window.Canvas) void {
     };
 
     drawLines(chart, y_min, y_max, lerp);
-    drawCandles(chart, &buckets, lerp);
+    drawCandles(chart, buckets, lerp);
 }
 
 fn drawCandles(
@@ -204,7 +176,7 @@ fn getYAxisSpacing(y_min: f32, y_max: f32) types.Price {
 }
 
 fn hasAtLeastMinLines(spacing: types.Price, y_min: f32, y_max: f32) bool {
-    // TODO: implement this better
+    // TODO: implement this better?
     const spacing_f32 = spacing.toFloat(f32);
     const count: usize = @floor((y_max - y_min) / spacing_f32);
     return count >= min_y_axis_lines;
