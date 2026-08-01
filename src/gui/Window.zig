@@ -188,13 +188,12 @@ pub fn run(self: *Self) !void {
 }
 
 pub const Rgb = [3]u8;
-pub const Rgba = [4]u8;
 
 pub const Rect = struct {
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
 
     pub fn intersect(a: Rect, b: Rect) Rect {
         const left = @max(a.x, b.x);
@@ -210,33 +209,36 @@ pub const Rect = struct {
 pub const Canvas = struct {
     pixels: [*]u8,
     stride: usize,
-    width: usize,
-    height: usize,
+    width: i32,
+    height: i32,
 
-    pub fn indexOf(self: Canvas, x: usize, y: usize) usize {
-        return 4 * (x + y * self.stride);
+    pub inline fn indexOf(self: Canvas, x: i32, y: i32) usize {
+        std.debug.assert(0 <= x and x < self.width);
+        std.debug.assert(0 <= y and y < self.height);
+
+        const x_usize: usize = @intCast(x);
+        const y_usize: usize = @intCast(y);
+        return 4 * (x_usize + y_usize * self.stride);
     }
 
-    pub fn set(self: Canvas, x: usize, y: usize, color: Rgb) void {
-        std.debug.assert(x < self.width);
-        std.debug.assert(y < self.height);
-
+    pub fn set(self: Canvas, x: i32, y: i32, color: Rgb) void {
         const index = self.indexOf(x, y);
         const pixel = self.pixels[index..][0..4];
         const rgba = color ++ .{255};
         @memcpy(pixel, &rgba);
     }
 
-    pub fn setMany(self: Canvas, x: usize, y: usize, n: usize, color: Rgb) void {
+    pub fn setMany(self: Canvas, x: i32, y: i32, n: i32, color: Rgb) void {
+        std.debug.assert(n >= 0);
         std.debug.assert(x + n <= self.width);
         std.debug.assert(y < self.height);
 
         const index = self.indexOf(x, y);
         const start: [*]u32 = @ptrCast(@alignCast(self.pixels + index));
-        const slice = start[0..n];
+        const slice = start[0..@intCast(n)];
         const rgba = color ++ .{255};
-        const int = std.mem.readInt(u32, &rgba, .native);
-        @memset(slice, int);
+        const rgba_u32 = std.mem.readInt(u32, &rgba, .native);
+        @memset(slice, rgba_u32);
     }
 
     pub fn fill(self: Canvas, color: Rgb) void {
@@ -246,8 +248,8 @@ pub const Canvas = struct {
     pub fn rectUnchecked(self: Canvas, r: Rect, color: Rgb) void {
         std.debug.assert(r.x + r.width <= self.width);
         std.debug.assert(r.y + r.height <= self.height);
-        for (0..r.height) |i| {
-            self.setMany(r.x, r.y + i, r.width, color);
+        for (0..@intCast(r.height)) |i| {
+            self.setMany(r.x, r.y + @as(i32, @intCast(i)), r.width, color);
         }
     }
 
@@ -268,8 +270,8 @@ pub const Canvas = struct {
         std.debug.assert(r.x + r.width <= self.width);
         std.debug.assert(r.y + r.height <= self.height);
 
-        for (0..r.height) |i| {
-            for (0..r.width) |j| {
+        for (0..@intCast(r.height)) |i| {
+            for (0..@intCast(r.width)) |j| {
                 const alpha = @as(f32, @floatFromInt(alphas[i][j])) / 255;
                 const fg_f32: @Vector(3, f32) = @floatFromInt(
                     @as(@Vector(3, u8), fg_color),
@@ -281,7 +283,11 @@ pub const Canvas = struct {
                     @as(@Vector(3, f32), @splat(1 - alpha)) * bg_f32 +
                     @as(@Vector(3, f32), @splat(alpha)) * fg_f32;
                 const color: @Vector(3, u8) = @round(color_f32);
-                self.set(r.x + j, r.y + i, color);
+                self.set(
+                    r.x + @as(i32, @intCast(j)),
+                    r.y + @as(i32, @intCast(i)),
+                    color,
+                );
             }
         }
     }

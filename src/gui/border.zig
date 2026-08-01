@@ -18,17 +18,17 @@ const top_right_bitmap = util.flip_horizontal(top_left_bitmap);
 const bottom_left_bitmap = util.flip_vertical(top_left_bitmap);
 const bottom_right_bitmap = util.flip_horizontal(bottom_left_bitmap);
 
-pub const border_radius = top_left_bitmap.len;
+pub const border_radius: i32 = top_left_bitmap.len;
 pub const border_width = 2;
 pub const edge_padding = 8;
 pub const interior_padding = 4;
 
 pub const Options = struct {
     pub const Padding = struct {
-        left: usize,
-        right: usize,
-        top: usize,
-        bottom: usize,
+        left: i32,
+        right: i32,
+        top: i32,
+        bottom: i32,
     };
 
     background_color: Window.Rgb,
@@ -37,20 +37,23 @@ pub const Options = struct {
 };
 
 pub fn draw(canvas: Window.Canvas, options: Options) Window.Rect {
+    const padding = options.padding;
+
+    std.debug.assert(padding.left >= 0);
+    std.debug.assert(padding.right >= 0);
+    std.debug.assert(padding.top >= 0);
+    std.debug.assert(padding.bottom >= 0);
     std.debug.assert(
-        options.padding.left + options.padding.right + 2 * border_radius <=
-            canvas.width,
+        padding.left + padding.right + 2 * border_radius <= canvas.width,
     );
     std.debug.assert(
-        options.padding.top + options.padding.bottom + 2 * border_radius <=
-            canvas.width,
+        padding.top + padding.bottom + 2 * border_radius <= canvas.width,
     );
 
     canvas.fill(options.background_color);
-    drawLines(canvas, options.border_color, options.padding);
+    drawLines(canvas, options.border_color, padding);
     drawCorners(canvas, options);
 
-    const padding = options.padding;
     return .{
         .x = padding.left + border_radius,
         .y = padding.top + border_radius,

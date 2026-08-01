@@ -4,6 +4,8 @@ const Candles = @import("../market/Candles.zig");
 const Window = @import("Window.zig");
 const border = @import("border.zig");
 const util = @import("../util.zig");
+const text = @import("text.zig");
+const fonts = @import("fonts");
 
 pub const bucket_count = 64;
 
@@ -35,11 +37,19 @@ pub fn draw(ptr: *anyopaque, canvas: Window.Canvas) void {
     candles.copy(&buckets);
     candles.mutex.unlock();
 
+    canvas.rect(
+        .{ .x = 0, .y = 950, .width = 300, .height = 400 },
+        .{ 255, 255, 255 },
+    );
+    text.draw(canvas, fonts.roboto_light20, "Hello", 50, 1000);
+    text.draw(canvas, fonts.roboto_light30, "Hello", 50, 1060);
+    text.draw(canvas, fonts.roboto_light40, "Hello", 50, 1120);
+
     const cropped = canvas.crop(.{
         .x = 0,
         .y = 0,
-        .width = canvas.width / 2,
-        .height = canvas.height / 2,
+        .width = @divExact(canvas.width, 2),
+        .height = @divExact(canvas.height, 2),
     });
     const interior = border.draw(cropped, .{
         .background_color = background_color,
@@ -97,14 +107,14 @@ fn drawCandles(
             flat_color;
 
         canvas.rect(.{
-            .x = i * candle_stride,
+            .x = @as(i32, @intCast(i)) * candle_stride,
             .y = @round(candle_top),
             .width = candle_width,
             .height = @round(candle_height),
         }, color);
 
         canvas.rect(.{
-            .x = i * candle_stride + wick_offset,
+            .x = @as(i32, @intCast(i)) * candle_stride + wick_offset,
             .y = @round(wick_top),
             .width = wick_width,
             .height = @round(wick_height),
